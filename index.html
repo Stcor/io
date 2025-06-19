@@ -287,6 +287,16 @@
             }
 
             function updateInspector() {
+                const openAccordionTexts = new Set(
+                    [...inspectorContent.querySelectorAll('.accordion-header')]
+                        .filter(header => header.nextElementSibling && !header.nextElementSibling.classList.contains('hidden'))
+                        .map(header => header.textContent.trim())
+                );
+                const focusedElement = document.activeElement;
+                const focusedProp = focusedElement ? focusedElement.dataset.prop : null;
+                const selectionStart = focusedElement ? focusedElement.selectionStart : null;
+                const selectionEnd = focusedElement ? focusedElement.selectionEnd : null;
+
                 const el = getElement(selectedElementId);
                 if (!el) {
                     inspectorContent.innerHTML = '<div class="text-gray-400 text-center">UI 요소를 선택하세요.</div>';
@@ -296,7 +306,6 @@
 
                 inspectorContent.innerHTML = `
                     <div class="space-y-2">
-                        <!-- Accordion: Basic Info -->
                         <div>
                             <button class="accordion-header">기본 정보</button>
                             <div class="accordion-content space-y-4">
@@ -305,7 +314,6 @@
                             </div>
                         </div>
 
-                        <!-- Accordion: Transform -->
                         <div>
                             <button class="accordion-header">위치 및 크기</button>
                             <div class="accordion-content space-y-4 hidden">
@@ -320,7 +328,6 @@
                             </div>
                         </div>
                         
-                        <!-- Accordion: Appearance -->
                         <div>
                             <button class="accordion-header">모양</button>
                             <div class="accordion-content space-y-4 hidden">
@@ -329,7 +336,6 @@
                             </div>
                         </div>
                         
-                         <!-- Accordion: Interaction -->
                         ${el.type === 'button' ? `
                         <div>
                             <button class="accordion-header">상호작용</button>
@@ -362,7 +368,6 @@
                             </div>
                         </div>` : ''}
                         
-                        <!-- Accordion: Animations -->
                         <div>
                             <button class="accordion-header">애니메이션</button>
                             <div class="accordion-content space-y-4 hidden">
@@ -393,10 +398,13 @@
                         <div class="pt-4"><button id="delete-btn" class="w-full bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-lg">요소 삭제</button></div>
                     </div>`;
 
-                // Accordion Logic
+                // Accordion Logic: Restore state and add listeners
                 inspectorContent.querySelectorAll('.accordion-header').forEach(header => {
+                    const content = header.nextElementSibling;
+                    if (openAccordionTexts.has(header.textContent.trim())) {
+                         content.classList.remove('hidden');
+                    }
                     header.addEventListener('click', () => {
-                        const content = header.nextElementSibling;
                         content.classList.toggle('hidden');
                     });
                 });
@@ -406,6 +414,17 @@
                     playAnimationPreview(el.id, e.target.dataset.animPreview);
                 }));
                 document.getElementById('delete-btn').addEventListener('click', deleteSelectedElement);
+
+                // Restore focus
+                if (focusedProp) {
+                    const newFocusedElement = inspectorContent.querySelector(`[data-prop='${focusedProp}']`);
+                    if (newFocusedElement) {
+                        newFocusedElement.focus();
+                        if (newFocusedElement.type !== 'number' && newFocusedElement.setSelectionRange) {
+                           newFocusedElement.setSelectionRange(selectionStart, selectionEnd);
+                        }
+                    }
+                }
             }
 
             function updateCodePreview() {
@@ -431,10 +450,9 @@
                 }
                 let value = e.target.type === 'number' ? (parseFloat(e.target.value) || 0) : e.target.value;
                 current[propPath[propPath.length - 1]] = value;
+                
                 renderAll();
-                updateInspector(); 
-                const newFocusedElement = inspectorContent.querySelector(`[data-prop='${e.target.dataset.prop}']`);
-                if(newFocusedElement) newFocusedElement.focus();
+                updateInspector();
             }
             
             function deleteSelectedElement() {
