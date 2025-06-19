@@ -162,561 +162,582 @@
 
     <script>
     document.addEventListener('DOMContentLoaded', () => {
-        // --- DOM Elements ---
-        const canvas = document.getElementById('canvas');
-        const inspectorContent = document.getElementById('inspector-content');
-        const exportBtn = document.getElementById('export-btn');
-        const hierarchyPanel = document.getElementById('hierarchy-panel');
-        const codePreview = document.getElementById('code-preview');
-        
-        // --- State Management ---
-        let uiElements = [];
-        let selectedElementId = null;
-        let nextId = 0;
-        let dragInfo = {}; // { type, sourceId, etc. }
-        let isDragging = false;
-        let isResizing = false;
-        let dragStartPos = { x: 0, y: 0 };
-        let elementStartPos = { x: 0, y: 0, w: 0, h: 0 };
-
-        // --- Utility Functions ---
-        const getCanvasRelativePos = (clientX, clientY) => {
-            const rect = canvas.getBoundingClientRect();
-            return { x: clientX - rect.left, y: clientY - rect.top };
-        };
-        const createTooltip = (text) => `<div class="tooltip inline-block ml-2"><span class="text-blue-400 font-bold cursor-help">(?)</span><div class="tooltiptext">${text}</div></div>`;
-        const getElement = (id) => uiElements.find(el => el.id === id);
-        const getChildren = (parentId) => uiElements.filter(el => el.parentId === parentId);
-        
-        function getElementAbsolutePos(el) {
-            if (!el) return { x: 0, y: 0, w: canvas.clientWidth, h: canvas.clientHeight };
+        try {
+            // --- DOM Elements ---
+            const canvas = document.getElementById('canvas');
+            const inspectorContent = document.getElementById('inspector-content');
+            const exportBtn = document.getElementById('export-btn');
+            const hierarchyPanel = document.getElementById('hierarchy-panel');
+            const codePreview = document.getElementById('code-preview');
             
-            const parent = getElement(el.parentId);
-            const parentPos = getElementAbsolutePos(parent);
-            const parentRect = {
-                width: parent ? (parent.size.w.unit === '%' ? parent.size.w.value / 100 * parentPos.w : parent.size.w.value) : canvas.clientWidth,
-                height: parent ? (parent.size.h.unit === '%' ? parent.size.h.value / 100 * parentPos.h : parent.size.h.value) : canvas.clientHeight,
+            // --- State Management ---
+            let uiElements = [];
+            let selectedElementId = null;
+            let nextId = 0;
+            let dragInfo = {}; // { type, sourceId, etc. }
+            let isDragging = false;
+            let isResizing = false;
+            let dragStartPos = { x: 0, y: 0 };
+            let elementStartPos = { x: 0, y: 0, w: 0, h: 0 };
+
+            // --- Utility Functions ---
+            const getCanvasRelativePos = (clientX, clientY) => {
+                const rect = canvas.getBoundingClientRect();
+                return { x: clientX - rect.left, y: clientY - rect.top };
             };
+            const createTooltip = (text) => `<div class="tooltip inline-block ml-2"><span class="text-blue-400 font-bold cursor-help">(?)</span><div class="tooltiptext">${text}</div></div>`;
+            const getElement = (id) => uiElements.find(el => el.id === id);
+            const getChildren = (parentId) => uiElements.filter(el => el.parentId === parentId);
+            
+            function getElementAbsolutePos(el) {
+                if (!el) return { x: 0, y: 0, w: canvas.clientWidth, h: canvas.clientHeight };
+                
+                const parent = getElement(el.parentId);
+                const parentPos = getElementAbsolutePos(parent);
+                const parentRect = {
+                    width: parent ? (parent.size.w.unit === '%' ? parent.size.w.value / 100 * parentPos.w : parent.size.w.value) : canvas.clientWidth,
+                    height: parent ? (parent.size.h.unit === '%' ? parent.size.h.value / 100 * parentPos.h : parent.size.h.value) : canvas.clientHeight,
+                };
 
-            const left = (el.pos.x.unit === '%') ? el.pos.x.value / 100 * parentRect.width : el.pos.x.value;
-            const top = (el.pos.y.unit === '%') ? el.pos.y.value / 100 * parentRect.height : el.pos.y.value;
+                const left = (el.pos.x.unit === '%') ? el.pos.x.value / 100 * parentRect.width : el.pos.x.value;
+                const top = (el.pos.y.unit === '%') ? el.pos.y.value / 100 * parentRect.height : el.pos.y.value;
 
-            return {
-                x: parentPos.x + left,
-                y: parentPos.y + top,
-                w: parentRect.width,
-                h: parentRect.height,
-            };
-        }
-
-        // --- Core Render Functions ---
-        function renderAll() {
-            canvas.innerHTML = '';
-            uiElements.sort((a, b) => a.zIndex - b.zIndex);
-            uiElements.forEach(el => renderElement(el));
-
-            if (selectedElementId !== null) {
-                const selectedDiv = canvas.querySelector(`[data-id='${selectedElementId}']`);
-                if (selectedDiv) {
-                    selectedDiv.classList.add('selected');
-                    const resizeHandle = document.createElement('div');
-                    resizeHandle.className = 'resize-handle br';
-                    selectedDiv.appendChild(resizeHandle);
-                    resizeHandle.addEventListener('mousedown', startResize);
-                    resizeHandle.addEventListener('touchstart', startResize, { passive: false });
-                }
+                return {
+                    x: parentPos.x + left,
+                    y: parentPos.y + top,
+                    w: parentRect.width,
+                    h: parentRect.height,
+                };
             }
-            renderHierarchy();
-            updateCodePreview();
-        }
 
-        function renderElement(el) {
-            const div = document.createElement('div');
-            div.className = `ui-element ui-element-${el.type}`;
-            div.dataset.id = el.id;
-            
-            const parent = getElement(el.parentId);
-            const parentPos = getElementAbsolutePos(parent);
-            const absPos = getElementAbsolutePos(el);
+            // --- Core Render Functions ---
+            function renderAll() {
+                canvas.innerHTML = '';
+                uiElements.sort((a, b) => a.zIndex - b.zIndex);
+                uiElements.forEach(el => renderElement(el));
 
-            const width = (el.size.w.unit === '%' ? el.size.w.value / 100 * parentPos.w : el.size.w.value);
-            const height = (el.size.h.unit === '%' ? el.size.h.value / 100 * parentPos.h : el.size.h.value);
-            
-            div.style.left = `${absPos.x}px`;
-            div.style.top = `${absPos.y}px`;
-            div.style.width = `${width}px`;
-            div.style.height = `${height}px`;
-            div.style.zIndex = el.zIndex;
-
-            switch (el.type) {
-                case 'image':
-                    div.style.backgroundImage = `url('${el.texture || ''}')`;
-                    if (!el.texture) div.style.backgroundColor = 'rgba(255,255,255,0.1)';
-                    break;
-                case 'button':
-                    div.textContent = el.text || '버튼';
-                    if (el.texture) {
-                        div.style.backgroundImage = `url('${el.texture}')`;
-                        div.style.backgroundSize = 'cover';
-                        div.style.borderWidth = '0px';
+                if (selectedElementId !== null) {
+                    const selectedDiv = canvas.querySelector(`[data-id='${selectedElementId}']`);
+                    if (selectedDiv) {
+                        selectedDiv.classList.add('selected');
+                        const resizeHandle = document.createElement('div');
+                        resizeHandle.className = 'resize-handle br';
+                        selectedDiv.appendChild(resizeHandle);
+                        resizeHandle.addEventListener('mousedown', startResize);
+                        resizeHandle.addEventListener('touchstart', startResize, { passive: false });
                     }
-                    break;
-                case 'label':
-                    div.textContent = el.text || '텍스트';
-                    break;
+                }
+                renderHierarchy();
+                updateCodePreview();
             }
-            canvas.appendChild(div);
-        }
 
-        function renderHierarchy() {
-            const buildHierarchyHtml = (parentId) => {
-                const children = getChildren(parentId).sort((a, b) => a.zIndex - b.zIndex);
-                if (children.length === 0) return '';
-                let html = '<ul>';
-                children.forEach(child => {
-                    html += `<li data-id="${child.id}" draggable="true" class="${child.id === selectedElementId ? 'selected' : ''}">
-                                <span>${child.name} (${child.type})</span>
-                                ${buildHierarchyHtml(child.id)}
-                             </li>`;
-                });
-                html += '</ul>';
-                return html;
-            };
-            hierarchyPanel.innerHTML = buildHierarchyHtml(null);
-        }
+            function renderElement(el) {
+                const div = document.createElement('div');
+                div.className = `ui-element ui-element-${el.type}`;
+                div.dataset.id = el.id;
+                
+                const parent = getElement(el.parentId);
+                const parentPos = getElementAbsolutePos(parent);
+                const absPos = getElementAbsolutePos(el);
 
-        function updateInspector() {
-            const el = getElement(selectedElementId);
-            if (!el) {
-                inspectorContent.innerHTML = '<div class="text-gray-400 text-center">UI 요소를 선택하세요.</div>';
-                return;
+                const width = (el.size.w.unit === '%' ? el.size.w.value / 100 * parentPos.w : el.size.w.value);
+                const height = (el.size.h.unit === '%' ? el.size.h.value / 100 * parentPos.h : el.size.h.value);
+                
+                div.style.left = `${absPos.x}px`;
+                div.style.top = `${absPos.y}px`;
+                div.style.width = `${width}px`;
+                div.style.height = `${height}px`;
+                div.style.zIndex = el.zIndex;
+
+                switch (el.type) {
+                    case 'image':
+                        div.style.backgroundImage = `url('${el.texture || ''}')`;
+                        if (!el.texture) div.style.backgroundColor = 'rgba(255,255,255,0.1)';
+                        break;
+                    case 'button':
+                        div.textContent = el.text || '버튼';
+                        if (el.texture) {
+                            div.style.backgroundImage = `url('${el.texture}')`;
+                            div.style.backgroundSize = 'cover';
+                            div.style.borderWidth = '0px';
+                        }
+                        break;
+                    case 'label':
+                        div.textContent = el.text || '텍스트';
+                        break;
+                }
+                canvas.appendChild(div);
             }
-            const parentName = el.parentId !== null ? getElement(el.parentId)?.name : '없음 (최상위)';
 
-            inspectorContent.innerHTML = `
-                <div class="space-y-2">
-                    <!-- Accordion: Basic Info -->
-                    <div>
-                        <button class="accordion-header">기본 정보</button>
-                        <div class="accordion-content space-y-4">
-                            <div><label class="font-bold text-sm">이름 ${createTooltip("JSON 파일에서 이 UI 요소를 식별하는 고유한 이름입니다.")}</label><input type="text" data-prop="name" value="${el.name}" class="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1 mt-1"></div>
-                            <div><label class="font-bold text-sm">부모</label><p class="text-gray-300 p-2 bg-gray-800 rounded mt-1">${parentName}</p></div>
-                        </div>
-                    </div>
+            function renderHierarchy() {
+                const buildHierarchyHtml = (parentId) => {
+                    const children = getChildren(parentId).sort((a, b) => a.zIndex - b.zIndex);
+                    if (children.length === 0) return '';
+                    let html = '<ul>';
+                    children.forEach(child => {
+                        html += `<li data-id="${child.id}" draggable="true" class="${child.id === selectedElementId ? 'selected' : ''}">
+                                    <span>${child.name} (${child.type})</span>
+                                    ${buildHierarchyHtml(child.id)}
+                                 </li>`;
+                    });
+                    html += '</ul>';
+                    return html;
+                };
+                hierarchyPanel.innerHTML = buildHierarchyHtml(null);
+            }
 
-                    <!-- Accordion: Transform -->
-                    <div>
-                        <button class="accordion-header">위치 및 크기</button>
-                        <div class="accordion-content space-y-4 hidden">
-                            <div class="grid grid-cols-2 gap-2">
-                                <div><label class="font-bold text-sm">X 오프셋 ${createTooltip("부모 요소 기준 가로 위치. %는 부모 너비에 대한 비율.")}</label><div class="flex items-center"><input type="number" data-prop="pos.x.value" value="${el.pos.x.value}" class="w-full bg-gray-800 border border-gray-600 rounded-l px-2 py-1"><select data-prop="pos.x.unit" class="bg-gray-800 border-t border-b border-r border-gray-600 rounded-r px-2 py-1 h-[34px]"><option value="px" ${el.pos.x.unit === 'px' ? 'selected' : ''}>px</option><option value="%" ${el.pos.x.unit === '%' ? 'selected' : ''}>%</option></select></div></div>
-                                <div><label class="font-bold text-sm">Y 오프셋 ${createTooltip("부모 요소 기준 세로 위치. %는 부모 높이에 대한 비율.")}</label><div class="flex items-center"><input type="number" data-prop="pos.y.value" value="${el.pos.y.value}" class="w-full bg-gray-800 border border-gray-600 rounded-l px-2 py-1"><select data-prop="pos.y.unit" class="bg-gray-800 border-t border-b border-r border-gray-600 rounded-r px-2 py-1 h-[34px]"><option value="px" ${el.pos.y.unit === 'px' ? 'selected' : ''}>px</option><option value="%" ${el.pos.y.unit === '%' ? 'selected' : ''}>%</option></select></div></div>
-                            </div>
-                            <div class="grid grid-cols-2 gap-2">
-                                <div><label class="font-bold text-sm">너비 ${createTooltip("가로 크기. %는 부모 너비에 대한 비율.")}</label><div class="flex items-center"><input type="number" data-prop="size.w.value" value="${el.size.w.value}" min="0" class="w-full bg-gray-800 border border-gray-600 rounded-l px-2 py-1"><select data-prop="size.w.unit" class="bg-gray-800 border-t border-b border-r border-gray-600 rounded-r px-2 py-1 h-[34px]"><option value="px" ${el.size.w.unit === 'px' ? 'selected' : ''}>px</option><option value="%" ${el.size.w.unit === '%' ? 'selected' : ''}>%</option></select></div></div>
-                                <div><label class="font-bold text-sm">높이 ${createTooltip("세로 크기. %는 부모 높이에 대한 비율.")}</label><div class="flex items-center"><input type="number" data-prop="size.h.value" value="${el.size.h.value}" min="0" class="w-full bg-gray-800 border border-gray-600 rounded-l px-2 py-1"><select data-prop="size.h.unit" class="bg-gray-800 border-t border-b border-r border-gray-600 rounded-r px-2 py-1 h-[34px]"><option value="px" ${el.size.h.unit === 'px' ? 'selected' : ''}>px</option><option value="%" ${el.size.h.unit === '%' ? 'selected' : ''}>%</option></select></div></div>
+            function updateInspector() {
+                const el = getElement(selectedElementId);
+                if (!el) {
+                    inspectorContent.innerHTML = '<div class="text-gray-400 text-center">UI 요소를 선택하세요.</div>';
+                    return;
+                }
+                const parentName = el.parentId !== null ? getElement(el.parentId)?.name : '없음 (최상위)';
+
+                inspectorContent.innerHTML = `
+                    <div class="space-y-2">
+                        <!-- Accordion: Basic Info -->
+                        <div>
+                            <button class="accordion-header">기본 정보</button>
+                            <div class="accordion-content space-y-4">
+                                <div><label class="font-bold text-sm">이름 ${createTooltip("JSON 파일에서 이 UI 요소를 식별하는 고유한 이름입니다.")}</label><input type="text" data-prop="name" value="${el.name}" class="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1 mt-1"></div>
+                                <div><label class="font-bold text-sm">부모</label><p class="text-gray-300 p-2 bg-gray-800 rounded mt-1">${parentName}</p></div>
                             </div>
                         </div>
-                    </div>
-                    
-                    <!-- Accordion: Appearance -->
-                    <div>
-                        <button class="accordion-header">모양</button>
-                        <div class="accordion-content space-y-4 hidden">
-                            ${(el.type === 'label' || el.type === 'button') ? `<div><label class="font-bold text-sm">텍스트</label><textarea data-prop="text" class="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1 mt-1 h-20">${el.text || ''}</textarea></div>` : ''}
-                            ${el.type === 'image' || el.type === 'button' ? `<div><label class="font-bold text-sm">이미지 경로 ${createTooltip("리소스팩 내부 텍스처 경로. 예: 'textures/ui/heart'")}</label><input type="text" data-prop="texture" value="${el.texture || ''}" placeholder="textures/ui/..." class="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1 mt-1"></div>` : ''}
-                        </div>
-                    </div>
-                    
-                     <!-- Accordion: Interaction -->
-                    ${el.type === 'button' ? `
-                    <div>
-                        <button class="accordion-header">상호작용</button>
-                        <div class="accordion-content space-y-4 hidden">
-                             <div>
-                                <label class="font-bold text-sm">동작 ${createTooltip("버튼을 눌렀을 때 실행될 동작을 선택합니다.")}</label>
-                                <select data-prop="action" class="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1 mt-1">
-                                    <option value="none" ${(el.action === 'none' || !el.action) ? 'selected' : ''}>동작 없음</option>
-                                    <option value="close_screen" ${el.action === 'close_screen' ? 'selected' : ''}>화면 닫기</option>
-                                    <option value="run_command" ${el.action === 'run_command' ? 'selected' : ''}>커맨드 실행</option>
-                                    <option value="open_url" ${el.action === 'open_url' ? 'selected' : ''}>URL 열기</option>
-                                    <option value="send_ui_event" ${el.action === 'send_ui_event' ? 'selected' : ''}>UI 이벤트 보내기</option>
-                                    <option value="play_animation" ${el.action === 'play_animation' ? 'selected' : ''}>애니메이션 재생</option>
-                                </select>
+
+                        <!-- Accordion: Transform -->
+                        <div>
+                            <button class="accordion-header">위치 및 크기</button>
+                            <div class="accordion-content space-y-4 hidden">
+                                <div class="grid grid-cols-2 gap-2">
+                                    <div><label class="font-bold text-sm">X 오프셋 ${createTooltip("부모 요소 기준 가로 위치. %는 부모 너비에 대한 비율.")}</label><div class="flex items-center"><input type="number" data-prop="pos.x.value" value="${el.pos.x.value}" class="w-full bg-gray-800 border border-gray-600 rounded-l px-2 py-1"><select data-prop="pos.x.unit" class="bg-gray-800 border-t border-b border-r border-gray-600 rounded-r px-2 py-1 h-[34px]"><option value="px" ${el.pos.x.unit === 'px' ? 'selected' : ''}>px</option><option value="%" ${el.pos.x.unit === '%' ? 'selected' : ''}>%</option></select></div></div>
+                                    <div><label class="font-bold text-sm">Y 오프셋 ${createTooltip("부모 요소 기준 세로 위치. %는 부모 높이에 대한 비율.")}</label><div class="flex items-center"><input type="number" data-prop="pos.y.value" value="${el.pos.y.value}" class="w-full bg-gray-800 border border-gray-600 rounded-l px-2 py-1"><select data-prop="pos.y.unit" class="bg-gray-800 border-t border-b border-r border-gray-600 rounded-r px-2 py-1 h-[34px]"><option value="px" ${el.pos.y.unit === 'px' ? 'selected' : ''}>px</option><option value="%" ${el.pos.y.unit === '%' ? 'selected' : ''}>%</option></select></div></div>
+                                </div>
+                                <div class="grid grid-cols-2 gap-2">
+                                    <div><label class="font-bold text-sm">너비 ${createTooltip("가로 크기. %는 부모 너비에 대한 비율.")}</label><div class="flex items-center"><input type="number" data-prop="size.w.value" value="${el.size.w.value}" min="0" class="w-full bg-gray-800 border border-gray-600 rounded-l px-2 py-1"><select data-prop="size.w.unit" class="bg-gray-800 border-t border-b border-r border-gray-600 rounded-r px-2 py-1 h-[34px]"><option value="px" ${el.size.w.unit === 'px' ? 'selected' : ''}>px</option><option value="%" ${el.size.w.unit === '%' ? 'selected' : ''}>%</option></select></div></div>
+                                    <div><label class="font-bold text-sm">높이 ${createTooltip("세로 크기. %는 부모 높이에 대한 비율.")}</label><div class="flex items-center"><input type="number" data-prop="size.h.value" value="${el.size.h.value}" min="0" class="w-full bg-gray-800 border border-gray-600 rounded-l px-2 py-1"><select data-prop="size.h.unit" class="bg-gray-800 border-t border-b border-r border-gray-600 rounded-r px-2 py-1 h-[34px]"><option value="px" ${el.size.h.unit === 'px' ? 'selected' : ''}>px</option><option value="%" ${el.size.h.unit === '%' ? 'selected' : ''}>%</option></select></div></div>
+                                </div>
                             </div>
-                            ${el.action === 'run_command' ? `<div><label class="font-bold text-sm mt-2">실행할 커맨드</label><input type="text" data-prop="command" value="${el.command || ''}" placeholder="/say Hello" class="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1 mt-1"></div>` : ''}
-                            ${el.action === 'open_url' ? `<div><label class="font-bold text-sm mt-2">열릴 URL</label><input type="text" data-prop="url" value="${el.url || ''}" placeholder="https://www.minecraft.net" class="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1 mt-1"></div>` : ''}
-                            ${el.action === 'send_ui_event' ? `<div><label class="font-bold text-sm mt-2">UI 이벤트 이름 ${createTooltip("스크립트에서 감지할 이벤트의 고유 이름입니다. 예: my_namespace:open_shop")}</label><input type="text" data-prop="eventName" value="${el.eventName || ''}" placeholder="namespace:event_name" class="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1 mt-1"></div>` : ''}
-                            ${el.action === 'play_animation' ? `
-                                <div class="space-y-2">
-                                    <label class="font-bold text-sm mt-2">대상 요소 이름</label>
-                                    <input type="text" data-prop="animTarget" value="${el.animTarget || ''}" placeholder="대상 요소의 이름" class="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1 mt-1">
-                                    <label class="font-bold text-sm mt-2">재생할 애니메이션</label>
-                                    <select data-prop="animName" class="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1 mt-1">
-                                        <option value="in" ${el.animName === 'in' ? 'selected' : ''}>등장 (In)</option>
-                                        <option value="out" ${el.animName === 'out' ? 'selected' : ''}>퇴장 (Out)</option>
+                        </div>
+                        
+                        <!-- Accordion: Appearance -->
+                        <div>
+                            <button class="accordion-header">모양</button>
+                            <div class="accordion-content space-y-4 hidden">
+                                ${(el.type === 'label' || el.type === 'button') ? `<div><label class="font-bold text-sm">텍스트</label><textarea data-prop="text" class="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1 mt-1 h-20">${el.text || ''}</textarea></div>` : ''}
+                                ${el.type === 'image' || el.type === 'button' ? `<div><label class="font-bold text-sm">이미지 경로 ${createTooltip("리소스팩 내부 텍스처 경로. 예: 'textures/ui/heart'")}</label><input type="text" data-prop="texture" value="${el.texture || ''}" placeholder="textures/ui/..." class="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1 mt-1"></div>` : ''}
+                            </div>
+                        </div>
+                        
+                         <!-- Accordion: Interaction -->
+                        ${el.type === 'button' ? `
+                        <div>
+                            <button class="accordion-header">상호작용</button>
+                            <div class="accordion-content space-y-4 hidden">
+                                 <div>
+                                    <label class="font-bold text-sm">동작 ${createTooltip("버튼을 눌렀을 때 실행될 동작을 선택합니다.")}</label>
+                                    <select data-prop="action" class="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1 mt-1">
+                                        <option value="none" ${(el.action === 'none' || !el.action) ? 'selected' : ''}>동작 없음</option>
+                                        <option value="close_screen" ${el.action === 'close_screen' ? 'selected' : ''}>화면 닫기</option>
+                                        <option value="run_command" ${el.action === 'run_command' ? 'selected' : ''}>커맨드 실행</option>
+                                        <option value="open_url" ${el.action === 'open_url' ? 'selected' : ''}>URL 열기</option>
+                                        <option value="send_ui_event" ${el.action === 'send_ui_event' ? 'selected' : ''}>UI 이벤트 보내기</option>
+                                        <option value="play_animation" ${el.action === 'play_animation' ? 'selected' : ''}>애니메이션 재생</option>
                                     </select>
                                 </div>
-                            ` : ''}
+                                ${el.action === 'run_command' ? `<div><label class="font-bold text-sm mt-2">실행할 커맨드</label><input type="text" data-prop="command" value="${el.command || ''}" placeholder="/say Hello" class="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1 mt-1"></div>` : ''}
+                                ${el.action === 'open_url' ? `<div><label class="font-bold text-sm mt-2">열릴 URL</label><input type="text" data-prop="url" value="${el.url || ''}" placeholder="https://www.minecraft.net" class="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1 mt-1"></div>` : ''}
+                                ${el.action === 'send_ui_event' ? `<div><label class="font-bold text-sm mt-2">UI 이벤트 이름 ${createTooltip("스크립트에서 감지할 이벤트의 고유 이름입니다. 예: my_namespace:open_shop")}</label><input type="text" data-prop="eventName" value="${el.eventName || ''}" placeholder="namespace:event_name" class="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1 mt-1"></div>` : ''}
+                                ${el.action === 'play_animation' ? `
+                                    <div class="space-y-2">
+                                        <label class="font-bold text-sm mt-2">대상 요소 이름</label>
+                                        <input type="text" data-prop="animTarget" value="${el.animTarget || ''}" placeholder="대상 요소의 이름" class="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1 mt-1">
+                                        <label class="font-bold text-sm mt-2">재생할 애니메이션</label>
+                                        <select data-prop="animName" class="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1 mt-1">
+                                            <option value="in" ${el.animName === 'in' ? 'selected' : ''}>등장 (In)</option>
+                                            <option value="out" ${el.animName === 'out' ? 'selected' : ''}>퇴장 (Out)</option>
+                                        </select>
+                                    </div>
+                                ` : ''}
+                            </div>
+                        </div>` : ''}
+                        
+                        <!-- Accordion: Animations -->
+                        <div>
+                            <button class="accordion-header">애니메이션</button>
+                            <div class="accordion-content space-y-4 hidden">
+                                <div class="mb-3 p-2 border border-gray-500 rounded">
+                                    <div class="flex justify-between items-center"><label class="font-bold text-sm">등장 (In)</label><button class="text-xs bg-blue-600 hover:bg-blue-700 px-2 py-1 rounded" data-anim-preview="in">▶ 미리보기</button></div>
+                                    <select data-prop="animations.in.type" class="w-full bg-gray-800 border border-gray-500 rounded px-2 py-1 mt-1">
+                                        <option value="none" ${el.animations.in.type === 'none' ? 'selected' : ''}>없음</option><option value="fade" ${el.animations.in.type === 'fade' ? 'selected' : ''}>페이드</option><option value="slide" ${el.animations.in.type === 'slide' ? 'selected' : ''}>슬라이드</option>
+                                    </select>
+                                    ${el.animations.in.type !== 'none' ? `<div class="grid grid-cols-2 gap-2 mt-2"><div><label class="text-xs">시간(초)</label><input type="number" step="0.1" data-prop="animations.in.duration" value="${el.animations.in.duration}" class="w-full bg-gray-800 border border-gray-500 rounded px-2 py-1"></div><div><label class="text-xs">가속도</label><select data-prop="animations.in.easing" class="w-full bg-gray-800 border border-gray-500 rounded px-2 py-1"><option value="linear" ${el.animations.in.easing === 'linear' ? 'selected' : ''}>일정하게</option><option value="ease_in" ${el.animations.in.easing === 'ease_in' ? 'selected' : ''}>서서히 시작</option><option value="ease_out" ${el.animations.in.easing === 'ease_out' ? 'selected' : ''}>서서히 종료</option><option value="ease_in_out" ${el.animations.in.easing === 'ease_in_out' ? 'selected' : ''}>부드럽게</option></select></div></div>${el.animations.in.type === 'slide' ? `<div class="mt-2"><label class="text-xs">방향</label><select data-prop="animations.in.direction" class="w-full bg-gray-800 border border-gray-500 rounded px-2 py-1"><option value="left" ${el.animations.in.direction === 'left' ? 'selected' : ''}>왼쪽</option><option value="right" ${el.animations.in.direction === 'right' ? 'selected' : ''}>오른쪽</option><option value="top" ${el.animations.in.direction === 'top' ? 'selected' : ''}>위</option><option value="bottom" ${el.animations.in.direction === 'bottom' ? 'selected' : ''}>아래</option></select></div>` : ''}` : ''}
+                                </div>
+                                <div class="mb-3 p-2 border border-gray-500 rounded">
+                                    <div class="flex justify-between items-center"><label class="font-bold text-sm">퇴장 (Out)</label><button class="text-xs bg-blue-600 hover:bg-blue-700 px-2 py-1 rounded" data-anim-preview="out">▶ 미리보기</button></div>
+                                    <select data-prop="animations.out.type" class="w-full bg-gray-800 border border-gray-500 rounded px-2 py-1 mt-1">
+                                        <option value="none" ${el.animations.out.type === 'none' ? 'selected' : ''}>없음</option><option value="fade" ${el.animations.out.type === 'fade' ? 'selected' : ''}>페이드</option><option value="slide" ${el.animations.out.type === 'slide' ? 'selected' : ''}>슬라이드</option>
+                                    </select>
+                                    ${el.animations.out.type !== 'none' ? `<div class="grid grid-cols-2 gap-2 mt-2"><div><label class="text-xs">시간(초)</label><input type="number" step="0.1" data-prop="animations.out.duration" value="${el.animations.out.duration}" class="w-full bg-gray-800 border border-gray-500 rounded px-2 py-1"></div><div><label class="text-xs">가속도</label><select data-prop="animations.out.easing" class="w-full bg-gray-800 border border-gray-500 rounded px-2 py-1"><option value="linear" ${el.animations.out.easing === 'linear' ? 'selected' : ''}>일정하게</option><option value="ease_in" ${el.animations.out.easing === 'ease_in' ? 'selected' : ''}>서서히 시작</option><option value="ease_out" ${el.animations.out.easing === 'ease_out' ? 'selected' : ''}>서서히 종료</option><option value="ease_in_out" ${el.animations.out.easing === 'ease_in_out' ? 'selected' : ''}>부드럽게</option></select></div></div>${el.animations.out.type === 'slide' ? `<div class="mt-2"><label class="text-xs">방향</label><select data-prop="animations.out.direction" class="w-full bg-gray-800 border border-gray-500 rounded px-2 py-1"><option value="left" ${el.animations.out.direction === 'left' ? 'selected' : ''}>왼쪽</option><option value="right" ${el.animations.out.direction === 'right' ? 'selected' : ''}>오른쪽</option><option value="top" ${el.animations.out.direction === 'top' ? 'selected' : ''}>위</option><option value="bottom" ${el.animations.out.direction === 'bottom' ? 'selected' : ''}>아래</option></select></div>` : ''}` : ''}
+                                </div>
+                                <div class="p-2 border border-gray-500 rounded">
+                                    <div class="flex justify-between items-center"><label class="font-bold text-sm">반복 (Loop)</label><button class="text-xs bg-blue-600 hover:bg-blue-700 px-2 py-1 rounded" data-anim-preview="loop">▶ 미리보기</button></div>
+                                    <select data-prop="animations.loop.type" class="w-full bg-gray-800 border border-gray-500 rounded px-2 py-1 mt-1">
+                                        <option value="none" ${el.animations.loop.type === 'none' ? 'selected' : ''}>없음</option><option value="pulse" ${el.animations.loop.type === 'pulse' ? 'selected' : ''}>반짝임 (크기)</option>
+                                    </select>
+                                    ${el.animations.loop.type !== 'none' ? `<div class="mt-2"><label class="text-xs">주기(초)</label><input type="number" step="0.1" data-prop="animations.loop.duration" value="${el.animations.loop.duration}" class="w-full bg-gray-800 border border-gray-500 rounded px-2 py-1"></div>` : ''}
+                                </div>
+                            </div>
                         </div>
-                    </div>` : ''}
-                    
-                    <!-- Accordion: Animations -->
-                    <div>
-                        <button class="accordion-header">애니메이션</button>
-                        <div class="accordion-content space-y-4 hidden">
-                            <div class="mb-3 p-2 border border-gray-500 rounded">
-                                <div class="flex justify-between items-center"><label class="font-bold text-sm">등장 (In)</label><button class="text-xs bg-blue-600 hover:bg-blue-700 px-2 py-1 rounded" data-anim-preview="in">▶ 미리보기</button></div>
-                                <select data-prop="animations.in.type" class="w-full bg-gray-800 border border-gray-500 rounded px-2 py-1 mt-1">
-                                    <option value="none" ${el.animations.in.type === 'none' ? 'selected' : ''}>없음</option><option value="fade" ${el.animations.in.type === 'fade' ? 'selected' : ''}>페이드</option><option value="slide" ${el.animations.in.type === 'slide' ? 'selected' : ''}>슬라이드</option>
-                                </select>
-                                ${el.animations.in.type !== 'none' ? `<div class="grid grid-cols-2 gap-2 mt-2"><div><label class="text-xs">시간(초)</label><input type="number" step="0.1" data-prop="animations.in.duration" value="${el.animations.in.duration}" class="w-full bg-gray-800 border border-gray-500 rounded px-2 py-1"></div><div><label class="text-xs">가속도</label><select data-prop="animations.in.easing" class="w-full bg-gray-800 border border-gray-500 rounded px-2 py-1"><option value="linear" ${el.animations.in.easing === 'linear' ? 'selected' : ''}>일정하게</option><option value="ease_in" ${el.animations.in.easing === 'ease_in' ? 'selected' : ''}>서서히 시작</option><option value="ease_out" ${el.animations.in.easing === 'ease_out' ? 'selected' : ''}>서서히 종료</option><option value="ease_in_out" ${el.animations.in.easing === 'ease_in_out' ? 'selected' : ''}>부드럽게</option></select></div></div>${el.animations.in.type === 'slide' ? `<div class="mt-2"><label class="text-xs">방향</label><select data-prop="animations.in.direction" class="w-full bg-gray-800 border border-gray-500 rounded px-2 py-1"><option value="left" ${el.animations.in.direction === 'left' ? 'selected' : ''}>왼쪽</option><option value="right" ${el.animations.in.direction === 'right' ? 'selected' : ''}>오른쪽</option><option value="top" ${el.animations.in.direction === 'top' ? 'selected' : ''}>위</option><option value="bottom" ${el.animations.in.direction === 'bottom' ? 'selected' : ''}>아래</option></select></div>` : ''}` : ''}
-                            </div>
-                            <div class="mb-3 p-2 border border-gray-500 rounded">
-                                <div class="flex justify-between items-center"><label class="font-bold text-sm">퇴장 (Out)</label><button class="text-xs bg-blue-600 hover:bg-blue-700 px-2 py-1 rounded" data-anim-preview="out">▶ 미리보기</button></div>
-                                <select data-prop="animations.out.type" class="w-full bg-gray-800 border border-gray-500 rounded px-2 py-1 mt-1">
-                                    <option value="none" ${el.animations.out.type === 'none' ? 'selected' : ''}>없음</option><option value="fade" ${el.animations.out.type === 'fade' ? 'selected' : ''}>페이드</option><option value="slide" ${el.animations.out.type === 'slide' ? 'selected' : ''}>슬라이드</option>
-                                </select>
-                                ${el.animations.out.type !== 'none' ? `<div class="grid grid-cols-2 gap-2 mt-2"><div><label class="text-xs">시간(초)</label><input type="number" step="0.1" data-prop="animations.out.duration" value="${el.animations.out.duration}" class="w-full bg-gray-800 border border-gray-500 rounded px-2 py-1"></div><div><label class="text-xs">가속도</label><select data-prop="animations.out.easing" class="w-full bg-gray-800 border border-gray-500 rounded px-2 py-1"><option value="linear" ${el.animations.out.easing === 'linear' ? 'selected' : ''}>일정하게</option><option value="ease_in" ${el.animations.out.easing === 'ease_in' ? 'selected' : ''}>서서히 시작</option><option value="ease_out" ${el.animations.out.easing === 'ease_out' ? 'selected' : ''}>서서히 종료</option><option value="ease_in_out" ${el.animations.out.easing === 'ease_in_out' ? 'selected' : ''}>부드럽게</option></select></div></div>${el.animations.out.type === 'slide' ? `<div class="mt-2"><label class="text-xs">방향</label><select data-prop="animations.out.direction" class="w-full bg-gray-800 border border-gray-500 rounded px-2 py-1"><option value="left" ${el.animations.out.direction === 'left' ? 'selected' : ''}>왼쪽</option><option value="right" ${el.animations.out.direction === 'right' ? 'selected' : ''}>오른쪽</option><option value="top" ${el.animations.out.direction === 'top' ? 'selected' : ''}>위</option><option value="bottom" ${el.animations.out.direction === 'bottom' ? 'selected' : ''}>아래</option></select></div>` : ''}` : ''}
-                            </div>
-                            <div class="p-2 border border-gray-500 rounded">
-                                <div class="flex justify-between items-center"><label class="font-bold text-sm">반복 (Loop)</label><button class="text-xs bg-blue-600 hover:bg-blue-700 px-2 py-1 rounded" data-anim-preview="loop">▶ 미리보기</button></div>
-                                <select data-prop="animations.loop.type" class="w-full bg-gray-800 border border-gray-500 rounded px-2 py-1 mt-1">
-                                    <option value="none" ${el.animations.loop.type === 'none' ? 'selected' : ''}>없음</option><option value="pulse" ${el.animations.loop.type === 'pulse' ? 'selected' : ''}>반짝임 (크기)</option>
-                                </select>
-                                ${el.animations.loop.type !== 'none' ? `<div class="mt-2"><label class="text-xs">주기(초)</label><input type="number" step="0.1" data-prop="animations.loop.duration" value="${el.animations.loop.duration}" class="w-full bg-gray-800 border border-gray-500 rounded px-2 py-1"></div>` : ''}
-                            </div>
-                        </div>
-                    </div>
-                    
-                    <div class="pt-4"><button id="delete-btn" class="w-full bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-lg">요소 삭제</button></div>
-                </div>`;
+                        
+                        <div class="pt-4"><button id="delete-btn" class="w-full bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-lg">요소 삭제</button></div>
+                    </div>`;
 
-            // Accordion Logic
-            inspectorContent.querySelectorAll('.accordion-header').forEach(header => {
-                header.addEventListener('click', () => {
-                    const content = header.nextElementSibling;
-                    content.classList.toggle('hidden');
+                // Accordion Logic
+                inspectorContent.querySelectorAll('.accordion-header').forEach(header => {
+                    header.addEventListener('click', () => {
+                        const content = header.nextElementSibling;
+                        content.classList.toggle('hidden');
+                    });
+                });
+
+                inspectorContent.querySelectorAll('input, select, textarea').forEach(input => input.addEventListener('input', (e) => handleInspectorChange(e, el.id)));
+                inspectorContent.querySelectorAll('[data-anim-preview]').forEach(button => button.addEventListener('click', (e) => {
+                    playAnimationPreview(el.id, e.target.dataset.animPreview);
+                }));
+                document.getElementById('delete-btn').addEventListener('click', deleteSelectedElement);
+            }
+
+            function updateCodePreview() {
+                const jsonString = generateJson(true);
+                codePreview.innerHTML = jsonString;
+            }
+
+            // --- Event Handlers & Logic ---
+            function selectElement(id) {
+                selectedElementId = id;
+                renderAll();
+                updateInspector();
+            }
+
+            function handleInspectorChange(e, id) {
+                const el = getElement(id);
+                if (!el) return;
+                const propPath = e.target.dataset.prop.split('.');
+                let current = el;
+                for (let i = 0; i < propPath.length - 1; i++) {
+                    if (!current[propPath[i]]) current[propPath[i]] = {};
+                    current = current[propPath[i]];
+                }
+                let value = e.target.type === 'number' ? (parseFloat(e.target.value) || 0) : e.target.value;
+                current[propPath[propPath.length - 1]] = value;
+                renderAll();
+                updateInspector(); 
+                const newFocusedElement = inspectorContent.querySelector(`[data-prop='${e.target.dataset.prop}']`);
+                if(newFocusedElement) newFocusedElement.focus();
+            }
+            
+            function deleteSelectedElement() {
+                if (selectedElementId === null) return;
+                const toDelete = [selectedElementId];
+                const collectChildren = (parentId) => {
+                    getChildren(parentId).forEach(child => { toDelete.push(child.id); collectChildren(child.id); });
+                };
+                collectChildren(selectedElementId);
+                uiElements = uiElements.filter(el => !toDelete.includes(el.id));
+                selectElement(null);
+            }
+
+            function startDrag(e) {
+                e.preventDefault(); const pointer = e.touches ? e.touches[0] : e; isDragging = true; dragInfo.type = 'drag';
+                const el = getElement(selectedElementId); if (!el) return;
+                const parent = getElement(el.parentId); const parentPos = getElementAbsolutePos(parent);
+                const currentX = (el.pos.x.unit === '%') ? el.pos.x.value / 100 * parentPos.w : el.pos.x.value;
+                const currentY = (el.pos.y.unit === '%') ? el.pos.y.value / 100 * parentPos.h : el.pos.y.value;
+                dragStartPos = { x: pointer.clientX, y: pointer.clientY };
+                elementStartPos = { x: currentX, y: currentY };
+                document.addEventListener('mousemove', onDragOrResize); document.addEventListener('mouseup', endDragOrResize);
+                document.addEventListener('touchmove', onDragOrResize, { passive: false }); document.addEventListener('touchend', endDragOrResize);
+            }
+
+            function startResize(e) {
+                e.stopPropagation(); e.preventDefault(); const pointer = e.touches ? e.touches[0] : e; isResizing = true; dragInfo.type = 'resize';
+                const el = getElement(selectedElementId); if (!el) return;
+                dragStartPos = { x: pointer.clientX, y: pointer.clientY };
+                const div = canvas.querySelector(`[data-id='${el.id}']`);
+                elementStartPos = { w: parseFloat(div.style.width), h: parseFloat(div.style.height) };
+                document.addEventListener('mousemove', onDragOrResize); document.addEventListener('mouseup', endDragOrResize);
+                document.addEventListener('touchmove', onDragOrResize, { passive: false }); document.addEventListener('touchend', endDragOrResize);
+            }
+
+            function onDragOrResize(e) {
+                if (!isDragging && !isResizing) return;
+                e.preventDefault(); const pointer = e.touches ? e.touches[0] : e;
+                const dx = pointer.clientX - dragStartPos.x; const dy = pointer.clientY - dragStartPos.y;
+                const el = getElement(selectedElementId); if (!el) return;
+                const parent = getElement(el.parentId); const parentPos = getElementAbsolutePos(parent);
+                const parentWidth = parentPos.w; const parentHeight = parentPos.h;
+
+                if (isResizing) {
+                    const newWidth = Math.max(10, elementStartPos.w + dx); const newHeight = Math.max(10, elementStartPos.h + dy);
+                    if (el.size.w.unit === '%') el.size.w.value = (newWidth / parentWidth) * 100; else el.size.w.value = newWidth;
+                    if (el.size.h.unit === '%') el.size.h.value = (newHeight / parentHeight) * 100; else el.size.h.value = newHeight;
+                } else if (isDragging) {
+                    let newX = elementStartPos.x + dx; let newY = elementStartPos.y + dy;
+                    if (el.pos.x.unit === '%') el.pos.x.value = (newX / parentWidth) * 100; else el.pos.x.value = newX;
+                    if (el.pos.y.unit === '%') el.pos.y.value = (newY / parentHeight) * 100; else el.pos.y.value = newY;
+                }
+                renderAll();
+            }
+
+            function endDragOrResize() {
+                if (isResizing || isDragging) {
+                    const el = getElement(selectedElementId);
+                    if (el) {
+                        if (el.pos.x.unit === 'px') el.pos.x.value = Math.round(el.pos.x.value);
+                        if (el.pos.y.unit === 'px') el.pos.y.value = Math.round(el.pos.y.value);
+                        if (el.size.w.unit === 'px') el.size.w.value = Math.round(el.size.w.value);
+                        if (el.size.h.unit === 'px') el.size.h.value = Math.round(el.size.h.value);
+                    }
+                }
+                if (isResizing) isResizing = false;
+                if (isDragging) isDragging = false;
+                renderAll(); updateInspector(); dragInfo.type = null;
+                document.removeEventListener('mousemove', onDragOrResize); document.removeEventListener('mouseup', endDragOrResize);
+                document.removeEventListener('touchmove', onDragOrResize); document.removeEventListener('touchend', endDragOrResize);
+            }
+
+            canvas.addEventListener('mousedown', (e) => {
+                const target = e.target.closest('.ui-element');
+                if (target && !e.target.classList.contains('resize-handle')) {
+                    const id = parseInt(target.dataset.id); selectElement(id); startDrag(e);
+                } else if (!target) { selectElement(null); }
+            });
+            
+            canvas.addEventListener('touchstart', (e) => {
+                const target = e.target.closest('.ui-element');
+                if (target && !e.target.classList.contains('resize-handle')) {
+                     const id = parseInt(target.dataset.id); selectElement(id); startDrag(e);
+                } else if (!target) { selectElement(null); }
+            }, { passive: false });
+
+            document.querySelectorAll('.draggable-tool').forEach(tool => {
+                tool.addEventListener('dragstart', (e) => { dragInfo = { type: 'tool', toolType: e.target.dataset.type }; });
+            });
+            
+            canvas.addEventListener('dragover', e => e.preventDefault());
+            canvas.addEventListener('drop', (e) => {
+                e.preventDefault();
+                if (dragInfo.type === 'tool') {
+                    const dropPos = getCanvasRelativePos(e.clientX, e.clientY);
+                    const dropTargetEl = e.target.closest('.ui-element');
+                    const parentId = dropTargetEl ? parseInt(dropTargetEl.dataset.id) : null;
+                    const parent = getElement(parentId);
+                    const parentPos = getElementAbsolutePos(parent);
+
+                    const newElement = {
+                        id: nextId++, name: `${dragInfo.toolType}_${nextId}`, type: dragInfo.toolType, parentId: parentId,
+                        pos: { x: { value: Math.round(dropPos.x - parentPos.x), unit: 'px' }, y: { value: Math.round(dropPos.y - parentPos.y), unit: 'px' } },
+                        size: { w: { value: 100, unit: 'px' }, h: { value: 50, unit: 'px' } },
+                        zIndex: uiElements.length, text: '텍스트', texture: '',
+                        animations: {
+                            in: { type: 'none', duration: 0.3, direction: 'left', easing: 'linear' },
+                            out: { type: 'none', duration: 0.3, direction: 'left', easing: 'linear' },
+                            loop: { type: 'none', duration: 1.0 }
+                        }
+                    };
+                    if (newElement.type === 'button') {
+                        newElement.action = 'none'; newElement.command = ''; newElement.url = ''; newElement.eventName = ''; newElement.animTarget = ''; newElement.animName = 'in';
+                    }
+                    uiElements.push(newElement);
+                    selectElement(newElement.id);
+                }
+            });
+
+            hierarchyPanel.addEventListener('click', (e) => { const target = e.target.closest('li'); if (target) selectElement(parseInt(target.dataset.id)); });
+            hierarchyPanel.addEventListener('dragstart', (e) => { e.stopPropagation(); const target = e.target.closest('li'); if (target) { e.dataTransfer.setData('text/plain', target.dataset.id); e.dataTransfer.effectAllowed = 'move'; dragInfo = { type: 'hierarchy', sourceId: parseInt(target.dataset.id) }; } });
+            hierarchyPanel.addEventListener('dragover', (e) => { e.preventDefault(); const target = e.target.closest('li'); document.querySelectorAll('.drag-over').forEach(el => el.classList.remove('drag-over')); if(target) target.classList.add('drag-over'); });
+            hierarchyPanel.addEventListener('dragleave', (e) => { const target = e.target.closest('li'); if(target) target.classList.remove('drag-over'); });
+            hierarchyPanel.addEventListener('drop', (e) => {
+                e.preventDefault(); e.stopPropagation(); document.querySelectorAll('.drag-over').forEach(el => el.classList.remove('drag-over'));
+                const sourceId = dragInfo.sourceId;
+                const targetLi = e.target.closest('li'); const targetId = targetLi ? parseInt(targetLi.dataset.id) : null;
+                const sourceEl = getElement(sourceId); if (!sourceEl || sourceId === targetId) return;
+                sourceEl.parentId = targetId;
+                uiElements.forEach((el, index) => el.zIndex = index);
+                renderAll();
+            });
+
+            document.querySelectorAll('.tab-button').forEach(button => {
+                button.addEventListener('click', (e) => {
+                    const parent = e.target.parentElement.parentElement;
+                    const tabId = e.target.dataset.tab;
+                    parent.querySelectorAll('.tab-button').forEach(btn => btn.classList.remove('active'));
+                    e.target.classList.add('active');
+                    parent.querySelectorAll('.tab-content').forEach(content => { content.classList.toggle('active', content.id === tabId); });
                 });
             });
 
-            inspectorContent.querySelectorAll('input, select, textarea').forEach(input => input.addEventListener('input', (e) => handleInspectorChange(e, el.id)));
-            inspectorContent.querySelectorAll('[data-anim-preview]').forEach(button => button.addEventListener('click', (e) => {
-                playAnimationPreview(el.id, e.target.dataset.animPreview);
-            }));
-            document.getElementById('delete-btn').addEventListener('click', deleteSelectedElement);
-        }
+            // --- Animation Preview ---
+            function playAnimationPreview(elementId, animCategory) {
+                const el = getElement(elementId);
+                const div = canvas.querySelector(`[data-id="${elementId}"]`);
+                if (!el || !div) return;
+                
+                const animData = el.animations[animCategory];
+                if (!animData || animData.type === 'none') return;
+                
+                div.style.transition = 'none';
+                div.style.transform = 'none';
+                div.style.opacity = '1';
+                void div.offsetHeight;
 
-        function updateCodePreview() {
-            const jsonString = generateJson(true);
-            codePreview.innerHTML = jsonString;
-        }
-
-        // --- Event Handlers & Logic ---
-        function selectElement(id) {
-            selectedElementId = id;
-            renderAll();
-            updateInspector();
-        }
-
-        function handleInspectorChange(e, id) {
-            const el = getElement(id);
-            if (!el) return;
-            const propPath = e.target.dataset.prop.split('.');
-            let current = el;
-            for (let i = 0; i < propPath.length - 1; i++) {
-                if (!current[propPath[i]]) current[propPath[i]] = {};
-                current = current[propPath[i]];
-            }
-            let value = e.target.type === 'number' ? (parseFloat(e.target.value) || 0) : e.target.value;
-            current[propPath[propPath.length - 1]] = value;
-            renderAll();
-            updateInspector(); 
-            const newFocusedElement = inspectorContent.querySelector(`[data-prop='${e.target.dataset.prop}']`);
-            if(newFocusedElement) newFocusedElement.focus();
-        }
-        
-        function deleteSelectedElement() {
-            if (selectedElementId === null) return;
-            const toDelete = [selectedElementId];
-            const collectChildren = (parentId) => {
-                getChildren(parentId).forEach(child => { toDelete.push(child.id); collectChildren(child.id); });
-            };
-            collectChildren(selectedElementId);
-            uiElements = uiElements.filter(el => !toDelete.includes(el.id));
-            selectElement(null);
-        }
-
-        function startDrag(e) {
-            e.preventDefault(); const pointer = e.touches ? e.touches[0] : e; isDragging = true; dragInfo.type = 'drag';
-            const el = getElement(selectedElementId); if (!el) return;
-            const parent = getElement(el.parentId); const parentPos = getElementAbsolutePos(parent);
-            const currentX = (el.pos.x.unit === '%') ? el.pos.x.value / 100 * parentPos.w : el.pos.x.value;
-            const currentY = (el.pos.y.unit === '%') ? el.pos.y.value / 100 * parentPos.h : el.pos.y.value;
-            dragStartPos = { x: pointer.clientX, y: pointer.clientY };
-            elementStartPos = { x: currentX, y: currentY };
-            document.addEventListener('mousemove', onDragOrResize); document.addEventListener('mouseup', endDragOrResize);
-            document.addEventListener('touchmove', onDragOrResize, { passive: false }); document.addEventListener('touchend', endDragOrResize);
-        }
-
-        function startResize(e) {
-            e.stopPropagation(); e.preventDefault(); const pointer = e.touches ? e.touches[0] : e; isResizing = true; dragInfo.type = 'resize';
-            const el = getElement(selectedElementId); if (!el) return;
-            dragStartPos = { x: pointer.clientX, y: pointer.clientY };
-            const div = canvas.querySelector(`[data-id='${el.id}']`);
-            elementStartPos = { w: parseFloat(div.style.width), h: parseFloat(div.style.height) };
-            document.addEventListener('mousemove', onDragOrResize); document.addEventListener('mouseup', endDragOrResize);
-            document.addEventListener('touchmove', onDragOrResize, { passive: false }); document.addEventListener('touchend', endDragOrResize);
-        }
-
-        function onDragOrResize(e) {
-            if (!isDragging && !isResizing) return;
-            e.preventDefault(); const pointer = e.touches ? e.touches[0] : e;
-            const dx = pointer.clientX - dragStartPos.x; const dy = pointer.clientY - dragStartPos.y;
-            const el = getElement(selectedElementId); if (!el) return;
-            const parent = getElement(el.parentId); const parentPos = getElementAbsolutePos(parent);
-            const parentWidth = parentPos.w; const parentHeight = parentPos.h;
-
-            if (isResizing) {
-                const newWidth = Math.max(10, elementStartPos.w + dx); const newHeight = Math.max(10, elementStartPos.h + dy);
-                if (el.size.w.unit === '%') el.size.w.value = (newWidth / parentWidth) * 100; else el.size.w.value = newWidth;
-                if (el.size.h.unit === '%') el.size.h.value = (newHeight / parentHeight) * 100; else el.size.h.value = newHeight;
-            } else if (isDragging) {
-                let newX = elementStartPos.x + dx; let newY = elementStartPos.y + dy;
-                if (el.pos.x.unit === '%') el.pos.x.value = (newX / parentWidth) * 100; else el.pos.x.value = newX;
-                if (el.pos.y.unit === '%') el.pos.y.value = (newY / parentHeight) * 100; else el.pos.y.value = newY;
-            }
-            renderAll();
-        }
-
-        function endDragOrResize() {
-            if (isResizing || isDragging) {
-                const el = getElement(selectedElementId);
-                if (el) {
-                    if (el.pos.x.unit === 'px') el.pos.x.value = Math.round(el.pos.x.value);
-                    if (el.pos.y.unit === 'px') el.pos.y.value = Math.round(el.pos.y.value);
-                    if (el.size.w.unit === 'px') el.size.w.value = Math.round(el.size.w.value);
-                    if (el.size.h.unit === 'px') el.size.h.value = Math.round(el.size.h.value);
-                }
-            }
-            if (isResizing) isResizing = false;
-            if (isDragging) isDragging = false;
-            renderAll(); updateInspector(); dragInfo.type = null;
-            document.removeEventListener('mousemove', onDragOrResize); document.removeEventListener('mouseup', endDragOrResize);
-            document.removeEventListener('touchmove', onDragOrResize); document.removeEventListener('touchend', endDragOrResize);
-        }
-
-        canvas.addEventListener('mousedown', (e) => {
-            const target = e.target.closest('.ui-element');
-            if (target && !e.target.classList.contains('resize-handle')) {
-                const id = parseInt(target.dataset.id); selectElement(id); startDrag(e);
-            } else if (!target) { selectElement(null); }
-        });
-        
-        canvas.addEventListener('touchstart', (e) => {
-            const target = e.target.closest('.ui-element');
-            if (target && !e.target.classList.contains('resize-handle')) {
-                 const id = parseInt(target.dataset.id); selectElement(id); startDrag(e);
-            } else if (!target) { selectElement(null); }
-        }, { passive: false });
-
-        document.querySelectorAll('.draggable-tool').forEach(tool => {
-            tool.addEventListener('dragstart', (e) => { dragInfo = { type: 'tool', toolType: e.target.dataset.type }; });
-        });
-        
-        canvas.addEventListener('dragover', e => e.preventDefault());
-        canvas.addEventListener('drop', (e) => {
-            e.preventDefault();
-            if (dragInfo.type === 'tool') {
-                const dropPos = getCanvasRelativePos(e.clientX, e.clientY);
-                const dropTargetEl = e.target.closest('.ui-element');
-                const parentId = dropTargetEl ? parseInt(dropTargetEl.dataset.id) : null;
-                const parent = getElement(parentId);
-                const parentPos = getElementAbsolutePos(parent);
-
-                const newElement = {
-                    id: nextId++, name: `${dragInfo.toolType}_${nextId}`, type: dragInfo.toolType, parentId: parentId,
-                    pos: { x: { value: Math.round(dropPos.x - parentPos.x), unit: 'px' }, y: { value: Math.round(dropPos.y - parentPos.y), unit: 'px' } },
-                    size: { w: { value: 100, unit: 'px' }, h: { value: 50, unit: 'px' } },
-                    zIndex: uiElements.length, text: '텍스트', texture: '',
-                    animations: {
-                        in: { type: 'none', duration: 0.3, direction: 'left', easing: 'linear' },
-                        out: { type: 'none', duration: 0.3, direction: 'left', easing: 'linear' },
-                        loop: { type: 'none', duration: 1.0 }
-                    }
-                };
-                if (newElement.type === 'button') {
-                    newElement.action = 'none'; newElement.command = ''; newElement.url = ''; newElement.eventName = ''; newElement.animTarget = ''; newElement.animName = 'in';
-                }
-                uiElements.push(newElement);
-                selectElement(newElement.id);
-            }
-        });
-
-        hierarchyPanel.addEventListener('click', (e) => { const target = e.target.closest('li'); if (target) selectElement(parseInt(target.dataset.id)); });
-        hierarchyPanel.addEventListener('dragstart', (e) => { e.stopPropagation(); const target = e.target.closest('li'); if (target) { e.dataTransfer.setData('text/plain', target.dataset.id); e.dataTransfer.effectAllowed = 'move'; dragInfo = { type: 'hierarchy', sourceId: parseInt(target.dataset.id) }; } });
-        hierarchyPanel.addEventListener('dragover', (e) => { e.preventDefault(); const target = e.target.closest('li'); document.querySelectorAll('.drag-over').forEach(el => el.classList.remove('drag-over')); if(target) target.classList.add('drag-over'); });
-        hierarchyPanel.addEventListener('dragleave', (e) => { const target = e.target.closest('li'); if(target) target.classList.remove('drag-over'); });
-        hierarchyPanel.addEventListener('drop', (e) => {
-            e.preventDefault(); e.stopPropagation(); document.querySelectorAll('.drag-over').forEach(el => el.classList.remove('drag-over'));
-            const sourceId = dragInfo.sourceId;
-            const targetLi = e.target.closest('li'); const targetId = targetLi ? parseInt(targetLi.dataset.id) : null;
-            const sourceEl = getElement(sourceId); if (!sourceEl || sourceId === targetId) return;
-            sourceEl.parentId = targetId;
-            uiElements.forEach((el, index) => el.zIndex = index);
-            renderAll();
-        });
-
-        document.querySelectorAll('.tab-button').forEach(button => {
-            button.addEventListener('click', (e) => {
-                const parent = e.target.parentElement.parentElement;
-                const tabId = e.target.dataset.tab;
-                parent.querySelectorAll('.tab-button').forEach(btn => btn.classList.remove('active'));
-                e.target.classList.add('active');
-                parent.querySelectorAll('.tab-content').forEach(content => { content.classList.toggle('active', content.id === tabId); });
-            });
-        });
-
-        // --- Animation Preview ---
-        function playAnimationPreview(elementId, animCategory) {
-            const el = getElement(elementId);
-            const div = canvas.querySelector(`[data-id="${elementId}"]`);
-            if (!el || !div) return;
-            
-            const animData = el.animations[animCategory];
-            if (!animData || animData.type === 'none') return;
-            
-            div.style.transition = 'none';
-            div.style.transform = 'none';
-            div.style.opacity = '1';
-            void div.offsetHeight; // Force reflow to apply reset styles immediately
-
-            const easingMap = { 'linear': 'linear', 'ease_in': 'ease-in', 'ease_out': 'ease-out', 'ease_in_out': 'ease-in-out' };
-            const easingFunc = easingMap[animData.easing] || 'linear';
-            
-            if (animCategory === 'in') {
-                if (animData.type === 'fade') { div.style.opacity = '0'; }
-                else if (animData.type === 'slide') {
-                    const dirMap = { left: 'translateX(-100%)', right: 'translateX(100%)', top: 'translateY(-100%)', bottom: 'translateY(100%)' };
-                    div.style.transform = dirMap[animData.direction];
-                }
-            }
-
-            requestAnimationFrame(() => {
-                div.style.transition = `all ${animData.duration}s ${easingFunc}`;
+                const easingMap = { 'linear': 'linear', 'ease_in': 'ease-in', 'ease_out': 'ease-out', 'ease_in_out': 'ease-in-out' };
+                const easingFunc = easingMap[animData.easing] || 'linear';
+                
                 if (animCategory === 'in') {
-                    div.style.opacity = '1'; div.style.transform = 'none';
-                } else if (animCategory === 'out') {
                     if (animData.type === 'fade') { div.style.opacity = '0'; }
                     else if (animData.type === 'slide') {
-                         const dirMap = { left: 'translateX(-100%)', right: 'translateX(100%)', top: 'translateY(-100%)', bottom: 'translateY(100%)' };
-                         div.style.transform = dirMap[animData.direction];
-                    }
-                } else if (animCategory === 'loop' && animData.type === 'pulse') {
-                    div.style.transition = `transform ${animData.duration/2}s ${easingFunc}`;
-                    div.style.transform = 'scale(1.05)';
-                    setTimeout(() => { div.style.transform = 'scale(1)'; }, animData.duration * 500);
-                }
-
-                setTimeout(() => {
-                    div.style.transition = 'none'; div.style.transform = 'none'; div.style.opacity = '1';
-                }, animData.duration * 1000 + 50);
-            });
-        }
-
-        // --- Export Logic ---
-        function generateJson(withSyntaxHighlighting = false) {
-            const root = { controls: [] }; const definitions = {}; const mappings = {}; let needsPulseAnimation = false;
-
-            const processElement = (el, parentControlList) => {
-                const control = {}; const defName = `${el.name}_definition`;
-                control[`${el.name}@${defName}`] = {}; parentControlList.push(control);
-
-                let def = {};
-                def.type = (el.type === 'label' || el.type === 'button') ? el.type : (el.type === 'image' ? 'image' : 'panel');
-                def.layer = el.zIndex; def.size = [`${el.size.w.value}${el.size.w.unit}`, `${el.size.h.value}${el.size.h.unit}`];
-                def.offset = [`${el.pos.x.value}${el.pos.x.unit}`, `${el.pos.y.value}${el.pos.y.unit}`];
-                if (el.type === 'label' || el.type === 'button') def.text = el.text;
-                if (el.type === 'image' || (el.type === 'button' && el.texture)) def.texture = el.texture;
-                
-                if (el.type === 'button') {
-                    if (el.action === 'close_screen') def['$pressed_button_name'] = 'button.exit';
-                    else if (el.action === 'run_command' && el.command) { def['$pressed_button_name'] = el.name; mappings[el.name] = { bindings: [{ binding_type: 'run_command', target: el.command }] }; }
-                    else if (el.action === 'open_url' && el.url) { def['$pressed_button_name'] = el.name; mappings[el.name] = { bindings: [{ binding_type: 'open_url', target: el.url }] }; }
-                    else if (el.action === 'send_ui_event' && el.eventName) { def['$pressed_button_name'] = el.name; mappings[el.name] = { bindings: [{ binding_type: 'send_ui_event', target: el.eventName }] }; }
-                    else if (el.action === 'play_animation' && el.animTarget && el.animName) {
-                        const eventName = `cui_anim:play_${el.animName}_on_${el.animTarget}`;
-                        def['$pressed_button_name'] = el.name;
-                        mappings[el.name] = { bindings: [{ binding_type: 'send_ui_event', target: eventName }] };
+                        const dirMap = { left: 'translateX(-100%)', right: 'translateX(100%)', top: 'translateY(-100%)', bottom: 'translateY(100%)' };
+                        div.style.transform = dirMap[animData.direction];
                     }
                 }
 
-                const addAnimation = (animData, directionType) => {
-                    if (!animData || animData.type === 'none') return null;
-                    const animObj = { anim_type: animData.type, duration: animData.duration || 0.3, easing: animData.easing || 'linear' };
-                    if (animData.type === 'slide') {
-                        const offsetMap = { left: [-1, 0], right: [1, 0], top: [0, -1], bottom: [0, 1] };
-                        const offset = offsetMap[animData.direction] || [-1, 0];
-                        if (directionType === 'in') animObj.from = [`${offset[0]*100}%`, `${offset[1]*100}%`];
-                        else animObj.to = [`${offset[0]*100}%`, `${offset[1]*100}%`];
+                requestAnimationFrame(() => {
+                    div.style.transition = `all ${animData.duration}s ${easingFunc}`;
+                    if (animCategory === 'in') {
+                        div.style.opacity = '1'; div.style.transform = 'none';
+                    } else if (animCategory === 'out') {
+                        if (animData.type === 'fade') { div.style.opacity = '0'; }
+                        else if (animData.type === 'slide') {
+                             const dirMap = { left: 'translateX(-100%)', right: 'translateX(100%)', top: 'translateY(-100%)', bottom: 'translateY(100%)' };
+                             div.style.transform = dirMap[animData.direction];
+                        }
+                    } else if (animCategory === 'loop' && animData.type === 'pulse') {
+                        div.style.transition = `transform ${animData.duration/2}s ${easingFunc}`;
+                        div.style.transform = 'scale(1.05)';
+                        setTimeout(() => { div.style.transform = 'scale(1)'; }, animData.duration * 500);
                     }
-                    return animObj;
-                };
 
-                const animIn = addAnimation(el.animations.in, 'in'); if (animIn) def.anim_in = animIn;
-                const animOut = addAnimation(el.animations.out, 'out'); if (animOut) def.anim_out = animOut;
-                if (el.animations.loop.type === 'pulse') {
-                    if(!def.animations) def.animations = {};
-                    def.animations['@custom_ui.pulse_anim_main'] = "1.0f"; needsPulseAnimation = true;
-                }
-                
-                const children = getChildren(el.id).sort((a,b) => a.zIndex - b.zIndex);
-                if (children.length > 0) { def.controls = []; children.forEach(child => processElement(child, def.controls)); }
-                definitions[defName] = def;
-            };
-
-            getChildren(null).sort((a, b) => a.zIndex - b.zIndex).forEach(el => processElement(el, root.controls));
-            
-            const screenContent = { "type": "panel", "size": ["100%", "100%"], ...root };
-            if (Object.keys(mappings).length > 0) screenContent.button_mappings = mappings;
-
-            let finalJson = {
-                "namespace": "custom_ui", "main_screen@common.base_screen": { "$screen_content": "custom_ui.screen_content" },
-                "screen_content": screenContent, ...definitions
-            };
-
-            if(needsPulseAnimation){
-                 finalJson["pulse_anim_main"] = { "anim_type": "scale", "from": 1.0, "to": 1.05, "duration": 0.7, "next": "@custom_ui.pulse_anim_rev", "easing": "ease_in_out" };
-                 finalJson["pulse_anim_rev"] = { "anim_type": "scale", "from": 1.05, "to": 1.0, "duration": 0.7, "next": "@custom_ui.pulse_anim_main", "easing": "ease_in_out" };
-            }
-
-            const jsonString = JSON.stringify(finalJson, null, 2);
-            if (withSyntaxHighlighting) {
-                return jsonString.replace(/("(\\u[a-zA-Z0-9]{4}|\\[^u]|[^\\"])*"(\s*:)?|\b(true|false|null)\b|-?\d+(?:\.\d*)?(?:[eE][+\-]?\d+)?)/g, (match) => {
-                    let cls = 'number';
-                    if (/^"/.test(match)) cls = /:$/.test(match) ? 'key' : 'string';
-                    else if (/true|false|null/.test(match)) cls = 'boolean';
-                    return `<span class="${cls}">${match}</span>`;
+                    setTimeout(() => {
+                        div.style.transition = 'none'; div.style.transform = 'none'; div.style.opacity = '1';
+                    }, animData.duration * 1000 + 50);
                 });
             }
-            return jsonString;
-        }
 
-        exportBtn.addEventListener('click', () => {
-             const zip = new JSZip();
-             const manifest = {
-                "format_version": 2, "header": { "name": "Custom UI Pack by Generator", "description": "A resource pack with custom UI.", "uuid": crypto.randomUUID(), "version": [1, 0, 0], "min_engine_version": [1, 19, 0] },
-                "modules": [{ "type": "resources", "uuid": crypto.randomUUID(), "version": [1, 0, 0] }]
-             };
-             zip.file("manifest.json", JSON.stringify(manifest, null, 2));
-             zip.file("ui/custom_screen.json", generateJson(false));
-             zip.folder("textures/ui");
-             zip.file("pack_icon.png", "iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAYAAACqaXHeAAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAJcEhZcwAADsMAAA7DAcdvqGQAAABTSURBVHja7cExAQAAAMKg9U9tCF8gAAAAAAAAAAAAAABsYgEAAAAAAAAAAAAAAAC2sAAAAAAAAAAAAAAAALCNAQAAAAAAAAAAAAAAYBsDAAAAAAAAAAAAAADANgYAAAAAAAAAAAAAAMA2BvwGAASvAcw4Q0EWAAAAAElFTkSuQmCC", {base64: true});
-             zip.generateAsync({type:"blob"}).then(content => saveAs(content, "CustomUIPack.mcpack"));
-        });
-        
-        renderAll();
-        updateInspector();
+            // --- Export Logic ---
+            function generateJson(withSyntaxHighlighting = false) {
+                const root = { controls: [] }; const definitions = {}; const mappings = {}; let needsPulseAnimation = false;
+
+                const processElement = (el, parentControlList) => {
+                    const control = {}; const defName = `${el.name}_definition`;
+                    control[`${el.name}@${defName}`] = {}; parentControlList.push(control);
+
+                    let def = {};
+                    def.type = (el.type === 'label' || el.type === 'button') ? el.type : (el.type === 'image' ? 'image' : 'panel');
+                    def.layer = el.zIndex; def.size = [`${el.size.w.value}${el.size.w.unit}`, `${el.size.h.value}${el.size.h.unit}`];
+                    def.offset = [`${el.pos.x.value}${el.pos.x.unit}`, `${el.pos.y.value}${el.pos.y.unit}`];
+                    if (el.type === 'label' || el.type === 'button') def.text = el.text;
+                    if (el.type === 'image' || (el.type === 'button' && el.texture)) def.texture = el.texture;
+                    
+                    if (el.type === 'button') {
+                        if (el.action === 'close_screen') def['$pressed_button_name'] = 'button.exit';
+                        else if (el.action === 'run_command' && el.command) { def['$pressed_button_name'] = el.name; mappings[el.name] = { bindings: [{ binding_type: 'run_command', target: el.command }] }; }
+                        else if (el.action === 'open_url' && el.url) { def['$pressed_button_name'] = el.name; mappings[el.name] = { bindings: [{ binding_type: 'open_url', target: el.url }] }; }
+                        else if (el.action === 'send_ui_event' && el.eventName) { def['$pressed_button_name'] = el.name; mappings[el.name] = { bindings: [{ binding_type: 'send_ui_event', target: el.eventName }] }; }
+                        else if (el.action === 'play_animation' && el.animTarget && el.animName) {
+                            const eventName = `cui_anim:play_${el.animName}_on_${el.animTarget}`;
+                            def['$pressed_button_name'] = el.name;
+                            mappings[el.name] = { bindings: [{ binding_type: 'send_ui_event', target: eventName }] };
+                        }
+                    }
+
+                    const addAnimation = (animData, directionType, eventName = null) => {
+                        if (!animData || animData.type === 'none') return null;
+                        const animObj = { anim_type: animData.type, duration: animData.duration || 0.3, easing: animData.easing || 'linear' };
+                        if (animData.type === 'slide') {
+                            const offsetMap = { left: [-1, 0], right: [1, 0], top: [0, -1], bottom: [0, 1] };
+                            const offset = offsetMap[animData.direction] || [-1, 0];
+                            if (directionType === 'in') animObj.from = [`${offset[0]*100}%`, `${offset[1]*100}%`];
+                            else animObj.to = [`${offset[0]*100}%`, `${offset[1]*100}%`];
+                        }
+                         if (eventName) {
+                            if (!def.animations) def.animations = {};
+                            def.animations[`@${eventName}`] = animObj;
+                        }
+                        return animObj;
+                    };
+
+                    addAnimation(el.animations.in, 'in', `cui_anim:play_in_on_${el.name}`);
+                    addAnimation(el.animations.out, 'out', `cui_anim:play_out_on_${el.name}`);
+
+                    if (el.animations.loop.type === 'pulse') {
+                        if(!def.animations) def.animations = {};
+                        def.animations['@custom_ui.pulse_anim_main'] = "1.0f"; needsPulseAnimation = true;
+                    }
+                    
+                    const children = getChildren(el.id).sort((a,b) => a.zIndex - b.zIndex);
+                    if (children.length > 0) { def.controls = []; children.forEach(child => processElement(child, def.controls)); }
+                    definitions[defName] = def;
+                };
+
+                getChildren(null).sort((a, b) => a.zIndex - b.zIndex).forEach(el => processElement(el, root.controls));
+                
+                const screenContent = { "type": "panel", "size": ["100%", "100%"], ...root };
+                if (Object.keys(mappings).length > 0) screenContent.button_mappings = mappings;
+
+                let finalJson = {
+                    "namespace": "custom_ui", "main_screen@common.base_screen": { "$screen_content": "custom_ui.screen_content" },
+                    "screen_content": screenContent, ...definitions
+                };
+
+                if(needsPulseAnimation){
+                     finalJson["pulse_anim_main"] = { "anim_type": "scale", "from": 1.0, "to": 1.05, "duration": 0.7, "next": "@custom_ui.pulse_anim_rev", "easing": "ease_in_out" };
+                     finalJson["pulse_anim_rev"] = { "anim_type": "scale", "from": 1.05, "to": 1.0, "duration": 0.7, "next": "@custom_ui.pulse_anim_main", "easing": "ease_in_out" };
+                }
+
+                const jsonString = JSON.stringify(finalJson, null, 2);
+                if (withSyntaxHighlighting) {
+                    return jsonString.replace(/("(\\u[a-zA-Z0-9]{4}|\\[^u]|[^\\"])*"(\s*:)?|\b(true|false|null)\b|-?\d+(?:\.\d*)?(?:[eE][+\-]?\d+)?)/g, (match) => {
+                        let cls = 'number';
+                        if (/^"/.test(match)) cls = /:$/.test(match) ? 'key' : 'string';
+                        else if (/true|false|null/.test(match)) cls = 'boolean';
+                        return `<span class="${cls}">${match}</span>`;
+                    });
+                }
+                return jsonString;
+            }
+
+            exportBtn.addEventListener('click', () => {
+                 const zip = new JSZip();
+                 const manifest = {
+                    "format_version": 2, "header": { "name": "Custom UI Pack by Generator", "description": "A resource pack with custom UI.", "uuid": crypto.randomUUID(), "version": [1, 0, 0], "min_engine_version": [1, 19, 0] },
+                    "modules": [{ "type": "resources", "uuid": crypto.randomUUID(), "version": [1, 0, 0] }]
+                 };
+                 zip.file("manifest.json", JSON.stringify(manifest, null, 2));
+                 zip.file("ui/custom_screen.json", generateJson(false));
+                 zip.folder("textures/ui");
+                 zip.file("pack_icon.png", "iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAYAAACqaXHeAAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAJcEhZcwAADsMAAA7DAcdvqGQAAABTSURBVHja7cExAQAAAMKg9U9tCF8gAAAAAAAAAAAAAABsYgEAAAAAAAAAAAAAAAC2sAAAAAAAAAAAAAAAALCNAQAAAAAAAAAAAAAAYBsDAAAAAAAAAAAAAADANgYAAAAAAAAAAAAAAMA2BvwGAASvAcw4Q0EWAAAAAElFTkSuQmCC", {base64: true});
+                 zip.generateAsync({type:"blob"}).then(content => saveAs(content, "CustomUIPack.mcpack"));
+            });
+            
+            renderAll();
+            updateInspector();
+
+        } catch (e) {
+            console.error("GUI 생성기 초기화 중 치명적인 오류 발생:", e);
+            const app = document.getElementById('app');
+            if (app) {
+                app.innerHTML = `
+                    <div class="w-full h-full flex items-center justify-center bg-red-800 text-white p-8">
+                        <div class="text-center">
+                            <h1 class="text-3xl font-bold mb-4">오류가 발생했습니다!</h1>
+                            <p class="mb-2">앱을 불러오는 데 실패했습니다. 개발자 콘솔(F12)을 확인해주세요.</p>
+                            <p class="text-sm font-mono bg-red-900 p-2 rounded">${e.toString()}</p>
+                        </div>
+                    </div>`;
+            }
+        }
     });
     </script>
 </body>
