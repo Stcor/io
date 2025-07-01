@@ -1,762 +1,408 @@
-<!DOCTYPE html>
-<html lang="ko">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Minecraft BE GUI 생성기</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
-    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700&display=swap" rel="stylesheet">
-    <style>
-        body {
-            font-family: 'Noto Sans KR', sans-serif;
-            overscroll-behavior: none;
-        }
-        .tooltip {
-            position: relative;
-            display: inline-block;
-        }
-        .tooltip .tooltiptext {
-            visibility: hidden;
-            width: 250px;
-            background-color: #555;
-            color: #fff;
-            text-align: left;
-            border-radius: 6px;
-            padding: 10px;
-            position: absolute;
-            z-index: 50;
-            bottom: 125%;
-            left: 50%;
-            margin-left: -125px;
-            opacity: 0;
-            transition: opacity 0.3s;
-            font-size: 12px;
-            line-height: 1.5;
-        }
-        .tooltip:hover .tooltiptext {
-            visibility: visible;
-            opacity: 1;
-        }
-        #canvas {
-            background-image:
-                linear-gradient(rgba(200, 200, 200, 0.2) 1px, transparent 1px),
-                linear-gradient(90deg, rgba(200, 200, 200, 0.2) 1px, transparent 1px);
-            background-size: 20px 20px;
-            background-color: #f0f0f0;
-            border: 2px dashed #ccc;
-            aspect-ratio: 16 / 9;
-            position: relative;
-            overflow: hidden;
-            touch-action: none;
-        }
-        .ui-element {
-            position: absolute;
-            box-sizing: border-box;
-            cursor: move;
-            transform-origin: center center;
-        }
-        .ui-element.selected {
-            outline: 2px solid #3b82f6;
-        }
-        .ui-element-panel { background-color: rgba(0, 0, 0, 0.1); border: 1px dashed rgba(0, 0, 0, 0.3); }
-        .ui-element-image { background-size: 100% 100%; background-repeat: no-repeat; background-position: center; border: 1px dashed #aaa; }
-        .ui-element-label { display: flex; align-items: center; justify-content: center; text-align: center; white-space: pre-wrap; word-break: break-all; color: #FFFFFF; text-shadow: 1px 1px 0 #3f3f3f, -1px -1px 0 #3f3f3f, 1px -1px 0 #3f3f3f, -1px 1px 0 #3f3f3f; }
-        .ui-element-button { display: flex; align-items: center; justify-content: center; text-align: center; background-color: #707070; border-style: solid; border-color: #d1d1d1 #525252 #525252 #d1d1d1; border-width: 2px; color: #FFFFFF; text-shadow: 1px 1px 0 #3f3f3f; cursor: pointer; }
-        .ui-element-button:active { border-color: #525252 #d1d1d1 #d1d1d1 #525252; }
-        .resize-handle { position: absolute; width: 10px; height: 10px; background: #3b82f6; border: 1px solid white; border-radius: 50%; z-index: 101; }
-        .resize-handle.br { bottom: -5px; right: -5px; cursor: se-resize; }
-        ::-webkit-scrollbar { width: 8px; }
-        ::-webkit-scrollbar-track { background: #f1f1f1; border-radius: 10px; }
-        ::-webkit-scrollbar-thumb { background: #888; border-radius: 10px; }
-        ::-webkit-scrollbar-thumb:hover { background: #555; }
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import * as Tone from 'tone';
+import { Upload, Music, FileDown, Play, Pause, Square, Loader2, ListMusic, Settings, Info, AlertTriangle } from 'lucide-react';
 
-        .tab-button.active { background-color: #4a5568; border-bottom-color: transparent; }
-        .tab-content { display: none; }
-        .tab-content.active { display: block; }
+// --- Minecraft 사운드 목록 ---
+const MINECRAFT_SOUNDS = [
+  "note.banjo", "note.bass", "note.bassattack", "note.bd", "note.bit",
+  "note.cow_bell", "note.didgeridoo", "note.flute", "note.guitar",
+  "note.harp", "note.hat", "note.icechime", "note.iron_xylophone",
+  "note.pling", "note.snare", "note.xylobone"
+];
+
+// --- Base64 인코딩된 오디오 데이터 ---
+// 네트워크 오류를 근본적으로 해결하기 위해, 외부 URL 대신 코드에 직접 오디오 데이터를 포함합니다.
+// 아래 데이터는 모든 사운드를 위한 임시 플레이스홀더(짧은 클릭음)입니다.
+// 실제 사운드로 교체하려면 각 .ogg 파일을 Base64로 인코딩하여 아래 맵에 추가해야 합니다.
+const SOUND_DATA_BASE64 = 'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=';
+const SOUND_DATA_MAP = MINECRAFT_SOUNDS.reduce((acc, sound) => {
+    acc[sound] = SOUND_DATA_BASE64;
+    return acc;
+}, {});
+
+
+// --- 피치 계산 함수 ---
+const calculatePitch = (midiNote) => {
+  return Math.pow(2, (midiNote - 66) / 12);
+};
+
+// --- 메인 앱 컴포넌트 ---
+export default function App() {
+  const [midiData, setMidiData] = useState(null);
+  const [fileName, setFileName] = useState("");
+  const [instrumentMapping, setInstrumentMapping] = useState({});
+  const [players, setPlayers] = useState({});
+  const [areSoundsLoaded, setAreSoundsLoaded] = useState(false);
+  const [librariesLoaded, setLibrariesLoaded] = useState(false);
+  const [playbackState, setPlaybackState] = useState('stopped');
+  const [isLoading, setIsLoading] = useState(true);
+  const [loadingError, setLoadingError] = useState(null);
+  const [isExporting, setIsExporting] = useState(false);
+  const [activeTab, setActiveTab] = useState('tracks');
+  const [showInstructions, setShowInstructions] = useState(true);
+
+  const scheduledEvents = useRef([]);
+
+  // --- 외부 라이브러리 및 사운드 로딩 Effect ---
+  useEffect(() => {
+    const loadDependencies = async () => {
+      setIsLoading(true);
+      setLoadingError(null);
+      try {
+        // 1. 외부 라이브러리 동적 로드
+        const loadScript = (src) => new Promise((resolve, reject) => {
+          if (document.querySelector(`script[src="${src}"]`)) {
+            resolve();
+            return;
+          }
+          const script = document.createElement('script');
+          script.src = src;
+          script.async = true;
+          script.onload = resolve;
+          script.onerror = () => reject(new Error(`${src} 로딩 실패`));
+          document.head.appendChild(script);
+        });
+
+        await Promise.all([
+          loadScript('https://cdn.jsdelivr.net/npm/@tonejs/midi@2.0.28/build/Midi.min.js'),
+          loadScript('https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js'),
+          loadScript('https://cdn.jsdelivr.net/npm/file-saver@2.0.5/dist/FileSaver.min.js')
+        ]);
+        setLibrariesLoaded(true);
+
+        // 2. Base64 데이터로부터 사운드 로드
+        const loadedPlayers = await new Promise((resolve, reject) => {
+            const tonePlayers = new Tone.Players(SOUND_DATA_MAP, () => {
+                resolve(tonePlayers);
+            }).toDestination();
+        });
         
-        #hierarchy-panel ul { list-style-type: none; padding-left: 20px; }
-        #hierarchy-panel li { background-color: #4a5568; padding: 8px; margin: 4px 0; border-radius: 4px; cursor: pointer; border: 2px solid transparent; }
-        #hierarchy-panel li.selected { border-color: #3b82f6; }
-        #hierarchy-panel li.drag-over { background-color: #6366f1; }
+        setPlayers(loadedPlayers);
+        setAreSoundsLoaded(true);
 
-        #code-preview { white-space: pre-wrap; word-wrap: break-word; font-family: 'Courier New', Courier, monospace; font-size: 13px; background-color: #1e1e1e; color: #d4d4d4; padding: 1rem; border-radius: 0.5rem; height: 100%; overflow: auto; }
-        #code-preview .key { color: #9cdcfe; }
-        #code-preview .string { color: #ce9178; }
-        #code-preview .number { color: #b5cea8; }
-        #code-preview .boolean { color: #569cd6; }
-        #code-preview .null { color: #569cd6; }
+      } catch (error) {
+        console.error("초기화 실패:", error);
+        setLoadingError(error.message || "필수 라이브러리 또는 사운드 파일을 불러오는 데 실패했습니다.");
+      } finally {
+        setIsLoading(false);
+      }
+    };
+    
+    loadDependencies();
+  }, []);
 
-        .accordion-header {
-            background-color: #4a5568;
-            padding: 0.75rem;
-            border-radius: 0.25rem;
-            cursor: pointer;
-            width: 100%;
-            text-align: left;
-            font-weight: bold;
-        }
-        .accordion-header:hover {
-            background-color: #535e72;
-        }
-        .accordion-content {
-            padding: 1rem;
-            border: 1px solid #4a5568;
-            border-top: none;
-            border-radius: 0 0 0.25rem 0.25rem;
-        }
-    </style>
-</head>
-<body class="bg-gray-800 text-white select-none">
-
-    <div id="app" class="flex flex-col md:flex-row h-screen w-screen">
-
-        <!-- Left Panel: Toolbox & Hierarchy -->
-        <div class="bg-gray-700 p-4 w-full md:w-72 flex-shrink-0 flex flex-col">
-            <div class="flex border-b border-gray-600 mb-2">
-                <button class="tab-button py-2 px-4 font-bold active" data-tab="toolbox-tab">요소</button>
-                <button class="tab-button py-2 px-4 font-bold" data-tab="hierarchy-tab">계층/레이어</button>
-            </div>
-            <div class="flex-grow overflow-y-auto">
-                <div id="toolbox-tab" class="tab-content active">
-                    <h2 class="text-xl font-bold mb-4">UI 요소 추가</h2>
-                    <div class="grid grid-cols-2 gap-4">
-                        <div class="draggable-tool bg-gray-600 hover:bg-gray-500 p-3 rounded-lg text-center cursor-pointer" draggable="true" data-type="panel">🔲<div class="text-sm mt-1">패널</div></div>
-                        <div class="draggable-tool bg-gray-600 hover:bg-gray-500 p-3 rounded-lg text-center cursor-pointer" draggable="true" data-type="image">🖼️<div class="text-sm mt-1">이미지</div></div>
-                        <div class="draggable-tool bg-gray-600 hover:bg-gray-500 p-3 rounded-lg text-center cursor-pointer" draggable="true" data-type="label">📝<div class="text-sm mt-1">텍스트</div></div>
-                        <div class="draggable-tool bg-gray-600 hover:bg-gray-500 p-3 rounded-lg text-center cursor-pointer" draggable="true" data-type="button">🔳<div class="text-sm mt-1">버튼</div></div>
-                    </div>
-                    <h2 class="text-xl font-bold mt-6 mb-4">팩 관리</h2>
-                    <button id="export-btn" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg">.mcpack으로 내보내기</button>
-                </div>
-                <div id="hierarchy-tab" class="tab-content">
-                    <h2 class="text-xl font-bold mb-2">UI 계층 및 레이어</h2>
-                    <p class="text-xs text-gray-400 mb-2">드래그하여 순서나 부모를 변경하세요.</p>
-                    <div id="hierarchy-panel" class="bg-gray-800 p-2 rounded-md h-full"></div>
-                </div>
-            </div>
-        </div>
-
-        <!-- Center Panel: Canvas -->
-        <div id="canvas-container" class="flex-grow flex items-center justify-center p-4 bg-gray-800">
-            <div id="canvas" class="w-full max-w-full bg-gray-900 shadow-lg"></div>
-        </div>
-
-        <!-- Right Panel: Inspector & Code -->
-        <div class="bg-gray-700 w-full md:w-80 flex-shrink-0 flex flex-col">
-            <div class="flex border-b border-gray-600 p-2">
-                <button class="tab-button py-2 px-4 font-bold flex-1 active" data-tab="inspector-tab">속성 편집</button>
-                <button class="tab-button py-2 px-4 font-bold flex-1" data-tab="code-tab">코드 보기</button>
-            </div>
-            <div class="flex-grow overflow-y-auto">
-                <div id="inspector-tab" class="tab-content active p-4">
-                    <div id="inspector-content" class="text-gray-400 text-center">UI 요소를 선택하세요.</div>
-                </div>
-                <div id="code-tab" class="tab-content h-full">
-                    <div id="code-preview"></div>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <script>
-    document.addEventListener('DOMContentLoaded', () => {
+  // --- MIDI 파일 처리 ---
+  const handleFileChange = async (event) => {
+    if (!librariesLoaded) return;
+    const file = event.target.files[0];
+    if (file) {
+      setIsLoading(true);
+      setFileName(file.name.replace(/\.(mid|midi)$/, ''));
+      const reader = new FileReader();
+      reader.onload = async (e) => {
         try {
-            // --- DOM Elements ---
-            const canvas = document.getElementById('canvas');
-            const inspectorContent = document.getElementById('inspector-content');
-            const exportBtn = document.getElementById('export-btn');
-            const hierarchyPanel = document.getElementById('hierarchy-panel');
-            const codePreview = document.getElementById('code-preview');
-            
-            // --- State Management ---
-            let uiElements = [];
-            let selectedElementId = null;
-            let nextId = 0;
-            let dragInfo = {}; // { type, sourceId, etc. }
-            let isDragging = false;
-            let isResizing = false;
-            let dragStartPos = { x: 0, y: 0 };
-            let elementStartPos = { x: 0, y: 0, w: 0, h: 0 };
-
-            // --- Utility Functions ---
-            const getCanvasRelativePos = (clientX, clientY) => {
-                const rect = canvas.getBoundingClientRect();
-                return { x: clientX - rect.left, y: clientY - rect.top };
-            };
-            const createTooltip = (text) => `<div class="tooltip inline-block ml-2"><span class="text-blue-400 font-bold cursor-help">(?)</span><div class="tooltiptext">${text}</div></div>`;
-            const getElement = (id) => uiElements.find(el => el.id === id);
-            const getChildren = (parentId) => uiElements.filter(el => el.parentId === parentId);
-            
-            function getElementAbsolutePos(el) {
-                if (!el) return { x: 0, y: 0, w: canvas.clientWidth, h: canvas.clientHeight };
-                
-                const parent = getElement(el.parentId);
-                const parentPos = getElementAbsolutePos(parent);
-                const parentRect = {
-                    width: parent ? (parent.size.w.unit === '%' ? parent.size.w.value / 100 * parentPos.w : parent.size.w.value) : canvas.clientWidth,
-                    height: parent ? (parent.size.h.unit === '%' ? parent.size.h.value / 100 * parentPos.h : parent.size.h.value) : canvas.clientHeight,
-                };
-
-                const left = (el.pos.x.unit === '%') ? el.pos.x.value / 100 * parentRect.width : el.pos.x.value;
-                const top = (el.pos.y.unit === '%') ? el.pos.y.value / 100 * parentRect.height : el.pos.y.value;
-
-                return {
-                    x: parentPos.x + left,
-                    y: parentPos.y + top,
-                    w: parentRect.width,
-                    h: parentRect.height,
-                };
-            }
-
-            // --- Core Render Functions ---
-            function renderAll() {
-                canvas.innerHTML = '';
-                uiElements.sort((a, b) => a.zIndex - b.zIndex);
-                uiElements.forEach(el => renderElement(el));
-
-                if (selectedElementId !== null) {
-                    const selectedDiv = canvas.querySelector(`[data-id='${selectedElementId}']`);
-                    if (selectedDiv) {
-                        selectedDiv.classList.add('selected');
-                        const resizeHandle = document.createElement('div');
-                        resizeHandle.className = 'resize-handle br';
-                        selectedDiv.appendChild(resizeHandle);
-                        resizeHandle.addEventListener('mousedown', startResize);
-                        resizeHandle.addEventListener('touchstart', startResize, { passive: false });
-                    }
-                }
-                renderHierarchy();
-                updateCodePreview();
-            }
-
-            function renderElement(el) {
-                const div = document.createElement('div');
-                div.className = `ui-element ui-element-${el.type}`;
-                div.dataset.id = el.id;
-                
-                const parent = getElement(el.parentId);
-                const parentPos = getElementAbsolutePos(parent);
-                const absPos = getElementAbsolutePos(el);
-
-                const width = (el.size.w.unit === '%' ? el.size.w.value / 100 * parentPos.w : el.size.w.value);
-                const height = (el.size.h.unit === '%' ? el.size.h.value / 100 * parentPos.h : el.size.h.value);
-                
-                div.style.left = `${absPos.x}px`;
-                div.style.top = `${absPos.y}px`;
-                div.style.width = `${width}px`;
-                div.style.height = `${height}px`;
-                div.style.zIndex = el.zIndex;
-
-                switch (el.type) {
-                    case 'image':
-                        div.style.backgroundImage = `url('${el.texture || ''}')`;
-                        if (!el.texture) div.style.backgroundColor = 'rgba(255,255,255,0.1)';
-                        break;
-                    case 'button':
-                        div.textContent = el.text || '버튼';
-                        if (el.texture) {
-                            div.style.backgroundImage = `url('${el.texture}')`;
-                            div.style.backgroundSize = 'cover';
-                            div.style.borderWidth = '0px';
-                        }
-                        break;
-                    case 'label':
-                        div.textContent = el.text || '텍스트';
-                        break;
-                }
-                canvas.appendChild(div);
-            }
-
-            function renderHierarchy() {
-                const buildHierarchyHtml = (parentId) => {
-                    const children = getChildren(parentId).sort((a, b) => a.zIndex - b.zIndex);
-                    if (children.length === 0) return '';
-                    let html = '<ul>';
-                    children.forEach(child => {
-                        html += `<li data-id="${child.id}" draggable="true" class="${child.id === selectedElementId ? 'selected' : ''}">
-                                    <span>${child.name} (${child.type})</span>
-                                    ${buildHierarchyHtml(child.id)}
-                                 </li>`;
-                    });
-                    html += '</ul>';
-                    return html;
-                };
-                hierarchyPanel.innerHTML = buildHierarchyHtml(null);
-            }
-
-            function updateInspector() {
-                const openAccordionTexts = new Set(
-                    [...inspectorContent.querySelectorAll('.accordion-header')]
-                        .filter(header => header.nextElementSibling && !header.nextElementSibling.classList.contains('hidden'))
-                        .map(header => header.textContent.trim())
-                );
-                const focusedElement = document.activeElement;
-                const focusedProp = focusedElement ? focusedElement.dataset.prop : null;
-                const selectionStart = focusedElement ? focusedElement.selectionStart : null;
-                const selectionEnd = focusedElement ? focusedElement.selectionEnd : null;
-
-                const el = getElement(selectedElementId);
-                if (!el) {
-                    inspectorContent.innerHTML = '<div class="text-gray-400 text-center">UI 요소를 선택하세요.</div>';
-                    return;
-                }
-                const parentName = el.parentId !== null ? getElement(el.parentId)?.name : '없음 (최상위)';
-
-                inspectorContent.innerHTML = `
-                    <div class="space-y-2">
-                        <div>
-                            <button class="accordion-header">기본 정보</button>
-                            <div class="accordion-content space-y-4">
-                                <div><label class="font-bold text-sm">이름 ${createTooltip("JSON 파일에서 이 UI 요소를 식별하는 고유한 이름입니다.")}</label><input type="text" data-prop="name" value="${el.name}" class="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1 mt-1"></div>
-                                <div><label class="font-bold text-sm">부모</label><p class="text-gray-300 p-2 bg-gray-800 rounded mt-1">${parentName}</p></div>
-                            </div>
-                        </div>
-
-                        <div>
-                            <button class="accordion-header">위치 및 크기</button>
-                            <div class="accordion-content space-y-4 hidden">
-                                <div class="grid grid-cols-2 gap-2">
-                                    <div><label class="font-bold text-sm">X 오프셋 ${createTooltip("부모 요소 기준 가로 위치. %는 부모 너비에 대한 비율.")}</label><div class="flex items-center"><input type="number" data-prop="pos.x.value" value="${el.pos.x.value}" class="w-full bg-gray-800 border border-gray-600 rounded-l px-2 py-1"><select data-prop="pos.x.unit" class="bg-gray-800 border-t border-b border-r border-gray-600 rounded-r px-2 py-1 h-[34px]"><option value="px" ${el.pos.x.unit === 'px' ? 'selected' : ''}>px</option><option value="%" ${el.pos.x.unit === '%' ? 'selected' : ''}>%</option></select></div></div>
-                                    <div><label class="font-bold text-sm">Y 오프셋 ${createTooltip("부모 요소 기준 세로 위치. %는 부모 높이에 대한 비율.")}</label><div class="flex items-center"><input type="number" data-prop="pos.y.value" value="${el.pos.y.value}" class="w-full bg-gray-800 border border-gray-600 rounded-l px-2 py-1"><select data-prop="pos.y.unit" class="bg-gray-800 border-t border-b border-r border-gray-600 rounded-r px-2 py-1 h-[34px]"><option value="px" ${el.pos.y.unit === 'px' ? 'selected' : ''}>px</option><option value="%" ${el.pos.y.unit === '%' ? 'selected' : ''}>%</option></select></div></div>
-                                </div>
-                                <div class="grid grid-cols-2 gap-2">
-                                    <div><label class="font-bold text-sm">너비 ${createTooltip("가로 크기. %는 부모 너비에 대한 비율.")}</label><div class="flex items-center"><input type="number" data-prop="size.w.value" value="${el.size.w.value}" min="0" class="w-full bg-gray-800 border border-gray-600 rounded-l px-2 py-1"><select data-prop="size.w.unit" class="bg-gray-800 border-t border-b border-r border-gray-600 rounded-r px-2 py-1 h-[34px]"><option value="px" ${el.size.w.unit === 'px' ? 'selected' : ''}>px</option><option value="%" ${el.size.w.unit === '%' ? 'selected' : ''}>%</option></select></div></div>
-                                    <div><label class="font-bold text-sm">높이 ${createTooltip("세로 크기. %는 부모 높이에 대한 비율.")}</label><div class="flex items-center"><input type="number" data-prop="size.h.value" value="${el.size.h.value}" min="0" class="w-full bg-gray-800 border border-gray-600 rounded-l px-2 py-1"><select data-prop="size.h.unit" class="bg-gray-800 border-t border-b border-r border-gray-600 rounded-r px-2 py-1 h-[34px]"><option value="px" ${el.size.h.unit === 'px' ? 'selected' : ''}>px</option><option value="%" ${el.size.h.unit === '%' ? 'selected' : ''}>%</option></select></div></div>
-                                </div>
-                            </div>
-                        </div>
-                        
-                        <div>
-                            <button class="accordion-header">모양</button>
-                            <div class="accordion-content space-y-4 hidden">
-                                ${(el.type === 'label' || el.type === 'button') ? `<div><label class="font-bold text-sm">텍스트</label><textarea data-prop="text" class="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1 mt-1 h-20">${el.text || ''}</textarea></div>` : ''}
-                                ${el.type === 'image' || el.type === 'button' ? `<div><label class="font-bold text-sm">이미지 경로 ${createTooltip("리소스팩 내부 텍스처 경로. 예: 'textures/ui/heart'")}</label><input type="text" data-prop="texture" value="${el.texture || ''}" placeholder="textures/ui/..." class="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1 mt-1"></div>` : ''}
-                            </div>
-                        </div>
-                        
-                        ${el.type === 'button' ? `
-                        <div>
-                            <button class="accordion-header">상호작용</button>
-                            <div class="accordion-content space-y-4 hidden">
-                                 <div>
-                                    <label class="font-bold text-sm">동작 ${createTooltip("버튼을 눌렀을 때 실행될 동작을 선택합니다.")}</label>
-                                    <select data-prop="action" class="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1 mt-1">
-                                        <option value="none" ${(el.action === 'none' || !el.action) ? 'selected' : ''}>동작 없음</option>
-                                        <option value="close_screen" ${el.action === 'close_screen' ? 'selected' : ''}>화면 닫기</option>
-                                        <option value="run_command" ${el.action === 'run_command' ? 'selected' : ''}>커맨드 실행</option>
-                                        <option value="open_url" ${el.action === 'open_url' ? 'selected' : ''}>URL 열기</option>
-                                        <option value="send_ui_event" ${el.action === 'send_ui_event' ? 'selected' : ''}>UI 이벤트 보내기</option>
-                                        <option value="play_animation" ${el.action === 'play_animation' ? 'selected' : ''}>애니메이션 재생</option>
-                                    </select>
-                                </div>
-                                ${el.action === 'run_command' ? `<div><label class="font-bold text-sm mt-2">실행할 커맨드</label><input type="text" data-prop="command" value="${el.command || ''}" placeholder="/say Hello" class="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1 mt-1"></div>` : ''}
-                                ${el.action === 'open_url' ? `<div><label class="font-bold text-sm mt-2">열릴 URL</label><input type="text" data-prop="url" value="${el.url || ''}" placeholder="https://www.minecraft.net" class="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1 mt-1"></div>` : ''}
-                                ${el.action === 'send_ui_event' ? `<div><label class="font-bold text-sm mt-2">UI 이벤트 이름 ${createTooltip("스크립트에서 감지할 이벤트의 고유 이름입니다. 예: my_namespace:open_shop")}</label><input type="text" data-prop="eventName" value="${el.eventName || ''}" placeholder="namespace:event_name" class="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1 mt-1"></div>` : ''}
-                                ${el.action === 'play_animation' ? `
-                                    <div class="space-y-2">
-                                        <label class="font-bold text-sm mt-2">대상 요소 이름</label>
-                                        <input type="text" data-prop="animTarget" value="${el.animTarget || ''}" placeholder="대상 요소의 이름" class="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1 mt-1">
-                                        <label class="font-bold text-sm mt-2">재생할 애니메이션</label>
-                                        <select data-prop="animName" class="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1 mt-1">
-                                            <option value="in" ${el.animName === 'in' ? 'selected' : ''}>등장 (In)</option>
-                                            <option value="out" ${el.animName === 'out' ? 'selected' : ''}>퇴장 (Out)</option>
-                                        </select>
-                                    </div>
-                                ` : ''}
-                            </div>
-                        </div>` : ''}
-                        
-                        <div>
-                            <button class="accordion-header">애니메이션</button>
-                            <div class="accordion-content space-y-4 hidden">
-                                <div class="mb-3 p-2 border border-gray-500 rounded">
-                                    <div class="flex justify-between items-center"><label class="font-bold text-sm">등장 (In)</label><button class="text-xs bg-blue-600 hover:bg-blue-700 px-2 py-1 rounded" data-anim-preview="in">▶ 미리보기</button></div>
-                                    <select data-prop="animations.in.type" class="w-full bg-gray-800 border border-gray-500 rounded px-2 py-1 mt-1">
-                                        <option value="none" ${el.animations.in.type === 'none' ? 'selected' : ''}>없음</option><option value="fade" ${el.animations.in.type === 'fade' ? 'selected' : ''}>페이드</option><option value="slide" ${el.animations.in.type === 'slide' ? 'selected' : ''}>슬라이드</option>
-                                    </select>
-                                    ${el.animations.in.type !== 'none' ? `<div class="grid grid-cols-2 gap-2 mt-2"><div><label class="text-xs">시간(초)</label><input type="number" step="0.1" data-prop="animations.in.duration" value="${el.animations.in.duration}" class="w-full bg-gray-800 border border-gray-500 rounded px-2 py-1"></div><div><label class="text-xs">가속도</label><select data-prop="animations.in.easing" class="w-full bg-gray-800 border border-gray-500 rounded px-2 py-1"><option value="linear" ${el.animations.in.easing === 'linear' ? 'selected' : ''}>일정하게</option><option value="ease_in" ${el.animations.in.easing === 'ease_in' ? 'selected' : ''}>서서히 시작</option><option value="ease_out" ${el.animations.in.easing === 'ease_out' ? 'selected' : ''}>서서히 종료</option><option value="ease_in_out" ${el.animations.in.easing === 'ease_in_out' ? 'selected' : ''}>부드럽게</option></select></div></div>${el.animations.in.type === 'slide' ? `<div class="mt-2"><label class="text-xs">방향</label><select data-prop="animations.in.direction" class="w-full bg-gray-800 border border-gray-500 rounded px-2 py-1"><option value="left" ${el.animations.in.direction === 'left' ? 'selected' : ''}>왼쪽</option><option value="right" ${el.animations.in.direction === 'right' ? 'selected' : ''}>오른쪽</option><option value="top" ${el.animations.in.direction === 'top' ? 'selected' : ''}>위</option><option value="bottom" ${el.animations.in.direction === 'bottom' ? 'selected' : ''}>아래</option></select></div>` : ''}` : ''}
-                                </div>
-                                <div class="mb-3 p-2 border border-gray-500 rounded">
-                                    <div class="flex justify-between items-center"><label class="font-bold text-sm">퇴장 (Out)</label><button class="text-xs bg-blue-600 hover:bg-blue-700 px-2 py-1 rounded" data-anim-preview="out">▶ 미리보기</button></div>
-                                    <select data-prop="animations.out.type" class="w-full bg-gray-800 border border-gray-500 rounded px-2 py-1 mt-1">
-                                        <option value="none" ${el.animations.out.type === 'none' ? 'selected' : ''}>없음</option><option value="fade" ${el.animations.out.type === 'fade' ? 'selected' : ''}>페이드</option><option value="slide" ${el.animations.out.type === 'slide' ? 'selected' : ''}>슬라이드</option>
-                                    </select>
-                                    ${el.animations.out.type !== 'none' ? `<div class="grid grid-cols-2 gap-2 mt-2"><div><label class="text-xs">시간(초)</label><input type="number" step="0.1" data-prop="animations.out.duration" value="${el.animations.out.duration}" class="w-full bg-gray-800 border border-gray-500 rounded px-2 py-1"></div><div><label class="text-xs">가속도</label><select data-prop="animations.out.easing" class="w-full bg-gray-800 border border-gray-500 rounded px-2 py-1"><option value="linear" ${el.animations.out.easing === 'linear' ? 'selected' : ''}>일정하게</option><option value="ease_in" ${el.animations.out.easing === 'ease_in' ? 'selected' : ''}>서서히 시작</option><option value="ease_out" ${el.animations.out.easing === 'ease_out' ? 'selected' : ''}>서서히 종료</option><option value="ease_in_out" ${el.animations.out.easing === 'ease_in_out' ? 'selected' : ''}>부드럽게</option></select></div></div>${el.animations.out.type === 'slide' ? `<div class="mt-2"><label class="text-xs">방향</label><select data-prop="animations.out.direction" class="w-full bg-gray-800 border border-gray-500 rounded px-2 py-1"><option value="left" ${el.animations.out.direction === 'left' ? 'selected' : ''}>왼쪽</option><option value="right" ${el.animations.out.direction === 'right' ? 'selected' : ''}>오른쪽</option><option value="top" ${el.animations.out.direction === 'top' ? 'selected' : ''}>위</option><option value="bottom" ${el.animations.out.direction === 'bottom' ? 'selected' : ''}>아래</option></select></div>` : ''}` : ''}
-                                </div>
-                                <div class="p-2 border border-gray-500 rounded">
-                                    <div class="flex justify-between items-center"><label class="font-bold text-sm">반복 (Loop)</label><button class="text-xs bg-blue-600 hover:bg-blue-700 px-2 py-1 rounded" data-anim-preview="loop">▶ 미리보기</button></div>
-                                    <select data-prop="animations.loop.type" class="w-full bg-gray-800 border border-gray-500 rounded px-2 py-1 mt-1">
-                                        <option value="none" ${el.animations.loop.type === 'none' ? 'selected' : ''}>없음</option><option value="pulse" ${el.animations.loop.type === 'pulse' ? 'selected' : ''}>반짝임 (크기)</option>
-                                    </select>
-                                    ${el.animations.loop.type !== 'none' ? `<div class="mt-2"><label class="text-xs">주기(초)</label><input type="number" step="0.1" data-prop="animations.loop.duration" value="${el.animations.loop.duration}" class="w-full bg-gray-800 border border-gray-500 rounded px-2 py-1"></div>` : ''}
-                                </div>
-                            </div>
-                        </div>
-                        
-                        <div class="pt-4"><button id="delete-btn" class="w-full bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-lg">요소 삭제</button></div>
-                    </div>`;
-
-                // Accordion Logic: Restore state and add listeners
-                inspectorContent.querySelectorAll('.accordion-header').forEach(header => {
-                    const content = header.nextElementSibling;
-                    if (openAccordionTexts.has(header.textContent.trim())) {
-                         content.classList.remove('hidden');
-                    }
-                    header.addEventListener('click', () => {
-                        content.classList.toggle('hidden');
-                    });
-                });
-
-                inspectorContent.querySelectorAll('input, select, textarea').forEach(input => input.addEventListener('input', (e) => handleInspectorChange(e, el.id)));
-                inspectorContent.querySelectorAll('[data-anim-preview]').forEach(button => button.addEventListener('click', (e) => {
-                    playAnimationPreview(el.id, e.target.dataset.animPreview);
-                }));
-                document.getElementById('delete-btn').addEventListener('click', deleteSelectedElement);
-
-                // Restore focus
-                if (focusedProp) {
-                    const newFocusedElement = inspectorContent.querySelector(`[data-prop='${focusedProp}']`);
-                    if (newFocusedElement) {
-                        newFocusedElement.focus();
-                        if (newFocusedElement.type !== 'number' && newFocusedElement.setSelectionRange) {
-                           newFocusedElement.setSelectionRange(selectionStart, selectionEnd);
-                        }
-                    }
-                }
-            }
-
-            function updateCodePreview() {
-                const jsonString = generateJson(true);
-                codePreview.innerHTML = jsonString;
-            }
-
-            // --- Event Handlers & Logic ---
-            function selectElement(id) {
-                selectedElementId = id;
-                renderAll();
-                updateInspector();
-            }
-
-            function handleInspectorChange(e, id) {
-                const el = getElement(id);
-                if (!el) return;
-                const propPath = e.target.dataset.prop.split('.');
-                let current = el;
-                for (let i = 0; i < propPath.length - 1; i++) {
-                    if (!current[propPath[i]]) current[propPath[i]] = {};
-                    current = current[propPath[i]];
-                }
-                let value = e.target.type === 'number' ? (parseFloat(e.target.value) || 0) : e.target.value;
-                current[propPath[propPath.length - 1]] = value;
-                
-                renderAll();
-                updateInspector();
-            }
-            
-            function deleteSelectedElement() {
-                if (selectedElementId === null) return;
-                const toDelete = [selectedElementId];
-                const collectChildren = (parentId) => {
-                    getChildren(parentId).forEach(child => { toDelete.push(child.id); collectChildren(child.id); });
-                };
-                collectChildren(selectedElementId);
-                uiElements = uiElements.filter(el => !toDelete.includes(el.id));
-                selectElement(null);
-            }
-
-            function startDrag(e) {
-                e.preventDefault(); const pointer = e.touches ? e.touches[0] : e; isDragging = true; dragInfo.type = 'drag';
-                const el = getElement(selectedElementId); if (!el) return;
-                const parent = getElement(el.parentId); const parentPos = getElementAbsolutePos(parent);
-                const currentX = (el.pos.x.unit === '%') ? el.pos.x.value / 100 * parentPos.w : el.pos.x.value;
-                const currentY = (el.pos.y.unit === '%') ? el.pos.y.value / 100 * parentPos.h : el.pos.y.value;
-                dragStartPos = { x: pointer.clientX, y: pointer.clientY };
-                elementStartPos = { x: currentX, y: currentY };
-                document.addEventListener('mousemove', onDragOrResize); document.addEventListener('mouseup', endDragOrResize);
-                document.addEventListener('touchmove', onDragOrResize, { passive: false }); document.addEventListener('touchend', endDragOrResize);
-            }
-
-            function startResize(e) {
-                e.stopPropagation(); e.preventDefault(); const pointer = e.touches ? e.touches[0] : e; isResizing = true; dragInfo.type = 'resize';
-                const el = getElement(selectedElementId); if (!el) return;
-                dragStartPos = { x: pointer.clientX, y: pointer.clientY };
-                const div = canvas.querySelector(`[data-id='${el.id}']`);
-                elementStartPos = { w: parseFloat(div.style.width), h: parseFloat(div.style.height) };
-                document.addEventListener('mousemove', onDragOrResize); document.addEventListener('mouseup', endDragOrResize);
-                document.addEventListener('touchmove', onDragOrResize, { passive: false }); document.addEventListener('touchend', endDragOrResize);
-            }
-
-            function onDragOrResize(e) {
-                if (!isDragging && !isResizing) return;
-                e.preventDefault(); const pointer = e.touches ? e.touches[0] : e;
-                const dx = pointer.clientX - dragStartPos.x; const dy = pointer.clientY - dragStartPos.y;
-                const el = getElement(selectedElementId); if (!el) return;
-                const parent = getElement(el.parentId); const parentPos = getElementAbsolutePos(parent);
-                const parentWidth = parentPos.w; const parentHeight = parentPos.h;
-
-                if (isResizing) {
-                    const newWidth = Math.max(10, elementStartPos.w + dx); const newHeight = Math.max(10, elementStartPos.h + dy);
-                    if (el.size.w.unit === '%') el.size.w.value = (newWidth / parentWidth) * 100; else el.size.w.value = newWidth;
-                    if (el.size.h.unit === '%') el.size.h.value = (newHeight / parentHeight) * 100; else el.size.h.value = newHeight;
-                } else if (isDragging) {
-                    let newX = elementStartPos.x + dx; let newY = elementStartPos.y + dy;
-                    if (el.pos.x.unit === '%') el.pos.x.value = (newX / parentWidth) * 100; else el.pos.x.value = newX;
-                    if (el.pos.y.unit === '%') el.pos.y.value = (newY / parentHeight) * 100; else el.pos.y.value = newY;
-                }
-                renderAll();
-            }
-
-            function endDragOrResize() {
-                if (isResizing || isDragging) {
-                    const el = getElement(selectedElementId);
-                    if (el) {
-                        if (el.pos.x.unit === 'px') el.pos.x.value = Math.round(el.pos.x.value);
-                        if (el.pos.y.unit === 'px') el.pos.y.value = Math.round(el.pos.y.value);
-                        if (el.size.w.unit === 'px') el.size.w.value = Math.round(el.size.w.value);
-                        if (el.size.h.unit === 'px') el.size.h.value = Math.round(el.size.h.value);
-                    }
-                }
-                if (isResizing) isResizing = false;
-                if (isDragging) isDragging = false;
-                renderAll(); updateInspector(); dragInfo.type = null;
-                document.removeEventListener('mousemove', onDragOrResize); document.removeEventListener('mouseup', endDragOrResize);
-                document.removeEventListener('touchmove', onDragOrResize); document.removeEventListener('touchend', endDragOrResize);
-            }
-
-            canvas.addEventListener('mousedown', (e) => {
-                const target = e.target.closest('.ui-element');
-                if (target && !e.target.classList.contains('resize-handle')) {
-                    const id = parseInt(target.dataset.id); selectElement(id); startDrag(e);
-                } else if (!target) { selectElement(null); }
-            });
-            
-            canvas.addEventListener('touchstart', (e) => {
-                const target = e.target.closest('.ui-element');
-                if (target && !e.target.classList.contains('resize-handle')) {
-                     const id = parseInt(target.dataset.id); selectElement(id); startDrag(e);
-                } else if (!target) { selectElement(null); }
-            }, { passive: false });
-
-            document.querySelectorAll('.draggable-tool').forEach(tool => {
-                tool.addEventListener('dragstart', (e) => { dragInfo = { type: 'tool', toolType: e.target.dataset.type }; });
-            });
-            
-            canvas.addEventListener('dragover', e => e.preventDefault());
-            canvas.addEventListener('drop', (e) => {
-                e.preventDefault();
-                if (dragInfo.type === 'tool') {
-                    const dropPos = getCanvasRelativePos(e.clientX, e.clientY);
-                    const dropTargetEl = e.target.closest('.ui-element');
-                    const parentId = dropTargetEl ? parseInt(dropTargetEl.dataset.id) : null;
-                    const parent = getElement(parentId);
-                    const parentPos = getElementAbsolutePos(parent);
-
-                    const newElement = {
-                        id: nextId++, name: `${dragInfo.toolType}_${nextId}`, type: dragInfo.toolType, parentId: parentId,
-                        pos: { x: { value: Math.round(dropPos.x - parentPos.x), unit: 'px' }, y: { value: Math.round(dropPos.y - parentPos.y), unit: 'px' } },
-                        size: { w: { value: 100, unit: 'px' }, h: { value: 50, unit: 'px' } },
-                        zIndex: uiElements.length, text: '텍스트', texture: '',
-                        animations: {
-                            in: { type: 'none', duration: 0.3, direction: 'left', easing: 'linear' },
-                            out: { type: 'none', duration: 0.3, direction: 'left', easing: 'linear' },
-                            loop: { type: 'none', duration: 1.0 }
-                        }
-                    };
-                    if (newElement.type === 'button') {
-                        newElement.action = 'none'; newElement.command = ''; newElement.url = ''; newElement.eventName = ''; newElement.animTarget = ''; newElement.animName = 'in';
-                    }
-                    uiElements.push(newElement);
-                    selectElement(newElement.id);
-                }
-            });
-
-            hierarchyPanel.addEventListener('click', (e) => { const target = e.target.closest('li'); if (target) selectElement(parseInt(target.dataset.id)); });
-            hierarchyPanel.addEventListener('dragstart', (e) => { e.stopPropagation(); const target = e.target.closest('li'); if (target) { e.dataTransfer.setData('text/plain', target.dataset.id); e.dataTransfer.effectAllowed = 'move'; dragInfo = { type: 'hierarchy', sourceId: parseInt(target.dataset.id) }; } });
-            hierarchyPanel.addEventListener('dragover', (e) => { e.preventDefault(); const target = e.target.closest('li'); document.querySelectorAll('.drag-over').forEach(el => el.classList.remove('drag-over')); if(target) target.classList.add('drag-over'); });
-            hierarchyPanel.addEventListener('dragleave', (e) => { const target = e.target.closest('li'); if(target) target.classList.remove('drag-over'); });
-            hierarchyPanel.addEventListener('drop', (e) => {
-                e.preventDefault(); e.stopPropagation(); document.querySelectorAll('.drag-over').forEach(el => el.classList.remove('drag-over'));
-                const sourceId = dragInfo.sourceId;
-                const targetLi = e.target.closest('li'); const targetId = targetLi ? parseInt(targetLi.dataset.id) : null;
-                const sourceEl = getElement(sourceId); if (!sourceEl || sourceId === targetId) return;
-                sourceEl.parentId = targetId;
-                uiElements.forEach((el, index) => el.zIndex = index);
-                renderAll();
-            });
-
-            document.querySelectorAll('.tab-button').forEach(button => {
-                button.addEventListener('click', (e) => {
-                    const parent = e.target.parentElement.parentElement;
-                    const tabId = e.target.dataset.tab;
-                    parent.querySelectorAll('.tab-button').forEach(btn => btn.classList.remove('active'));
-                    e.target.classList.add('active');
-                    parent.querySelectorAll('.tab-content').forEach(content => { content.classList.toggle('active', content.id === tabId); });
-                });
-            });
-
-            // --- Animation Preview ---
-            function playAnimationPreview(elementId, animCategory) {
-                const el = getElement(elementId);
-                const div = canvas.querySelector(`[data-id="${elementId}"]`);
-                if (!el || !div) return;
-                
-                const animData = el.animations[animCategory];
-                if (!animData || animData.type === 'none') return;
-                
-                div.style.transition = 'none';
-                div.style.transform = 'none';
-                div.style.opacity = '1';
-                void div.offsetHeight;
-
-                const easingMap = { 'linear': 'linear', 'ease_in': 'ease-in', 'ease_out': 'ease-out', 'ease_in_out': 'ease-in-out' };
-                const easingFunc = easingMap[animData.easing] || 'linear';
-                
-                if (animCategory === 'in') {
-                    if (animData.type === 'fade') { div.style.opacity = '0'; }
-                    else if (animData.type === 'slide') {
-                        const dirMap = { left: 'translateX(-100%)', right: 'translateX(100%)', top: 'translateY(-100%)', bottom: 'translateY(100%)' };
-                        div.style.transform = dirMap[animData.direction];
-                    }
-                }
-
-                requestAnimationFrame(() => {
-                    div.style.transition = `all ${animData.duration}s ${easingFunc}`;
-                    if (animCategory === 'in') {
-                        div.style.opacity = '1'; div.style.transform = 'none';
-                    } else if (animCategory === 'out') {
-                        if (animData.type === 'fade') { div.style.opacity = '0'; }
-                        else if (animData.type === 'slide') {
-                             const dirMap = { left: 'translateX(-100%)', right: 'translateX(100%)', top: 'translateY(-100%)', bottom: 'translateY(100%)' };
-                             div.style.transform = dirMap[animData.direction];
-                        }
-                    } else if (animCategory === 'loop' && animData.type === 'pulse') {
-                        div.style.transition = `transform ${animData.duration/2}s ${easingFunc}`;
-                        div.style.transform = 'scale(1.05)';
-                        setTimeout(() => { div.style.transform = 'scale(1)'; }, animData.duration * 500);
-                    }
-
-                    setTimeout(() => {
-                        div.style.transition = 'none'; div.style.transform = 'none'; div.style.opacity = '1';
-                    }, animData.duration * 1000 + 50);
-                });
-            }
-
-            // --- Export Logic ---
-            function generateJson(withSyntaxHighlighting = false) {
-                const root = { controls: [] }; const definitions = {}; const mappings = {}; let needsPulseAnimation = false;
-
-                const processElement = (el, parentControlList) => {
-                    const control = {}; const defName = `${el.name}_definition`;
-                    control[`${el.name}@${defName}`] = {}; parentControlList.push(control);
-
-                    let def = {};
-                    def.type = (el.type === 'label' || el.type === 'button') ? el.type : (el.type === 'image' ? 'image' : 'panel');
-                    def.layer = el.zIndex; def.size = [`${el.size.w.value}${el.size.w.unit}`, `${el.size.h.value}${el.size.h.unit}`];
-                    def.offset = [`${el.pos.x.value}${el.pos.x.unit}`, `${el.pos.y.value}${el.pos.y.unit}`];
-                    if (el.type === 'label' || el.type === 'button') def.text = el.text;
-                    if (el.type === 'image' || (el.type === 'button' && el.texture)) def.texture = el.texture;
-                    
-                    if (el.type === 'button') {
-                        if (el.action === 'close_screen') def['$pressed_button_name'] = 'button.exit';
-                        else if (el.action === 'run_command' && el.command) { def['$pressed_button_name'] = el.name; mappings[el.name] = { bindings: [{ binding_type: 'run_command', target: el.command }] }; }
-                        else if (el.action === 'open_url' && el.url) { def['$pressed_button_name'] = el.name; mappings[el.name] = { bindings: [{ binding_type: 'open_url', target: el.url }] }; }
-                        else if (el.action === 'send_ui_event' && el.eventName) { def['$pressed_button_name'] = el.name; mappings[el.name] = { bindings: [{ binding_type: 'send_ui_event', target: el.eventName }] }; }
-                        else if (el.action === 'play_animation' && el.animTarget && el.animName) {
-                            const eventName = `cui_anim:play_${el.animName}_on_${el.animTarget}`;
-                            def['$pressed_button_name'] = el.name;
-                            mappings[el.name] = { bindings: [{ binding_type: 'send_ui_event', target: eventName }] };
-                        }
-                    }
-
-                    const addAnimation = (animData, directionType, eventName = null) => {
-                        if (!animData || animData.type === 'none') return null;
-                        const animObj = { anim_type: animData.type, duration: animData.duration || 0.3, easing: animData.easing || 'linear' };
-                        if (animData.type === 'slide') {
-                            const offsetMap = { left: [-1, 0], right: [1, 0], top: [0, -1], bottom: [0, 1] };
-                            const offset = offsetMap[animData.direction] || [-1, 0];
-                            if (directionType === 'in') animObj.from = [`${offset[0]*100}%`, `${offset[1]*100}%`];
-                            else animObj.to = [`${offset[0]*100}%`, `${offset[1]*100}%`];
-                        }
-                         if (eventName) {
-                            if (!def.animations) def.animations = {};
-                            def.animations[`@${eventName}`] = animObj;
-                        }
-                        return animObj;
-                    };
-
-                    addAnimation(el.animations.in, 'in', `cui_anim:play_in_on_${el.name}`);
-                    addAnimation(el.animations.out, 'out', `cui_anim:play_out_on_${el.name}`);
-
-                    if (el.animations.loop.type === 'pulse') {
-                        if(!def.animations) def.animations = {};
-                        def.animations['@custom_ui.pulse_anim_main'] = "1.0f"; needsPulseAnimation = true;
-                    }
-                    
-                    const children = getChildren(el.id).sort((a,b) => a.zIndex - b.zIndex);
-                    if (children.length > 0) { def.controls = []; children.forEach(child => processElement(child, def.controls)); }
-                    definitions[defName] = def;
-                };
-
-                getChildren(null).sort((a, b) => a.zIndex - b.zIndex).forEach(el => processElement(el, root.controls));
-                
-                const screenContent = { "type": "panel", "size": ["100%", "100%"], ...root };
-                if (Object.keys(mappings).length > 0) screenContent.button_mappings = mappings;
-
-                let finalJson = {
-                    "namespace": "custom_ui", "main_screen@common.base_screen": { "$screen_content": "custom_ui.screen_content" },
-                    "screen_content": screenContent, ...definitions
-                };
-
-                if(needsPulseAnimation){
-                     finalJson["pulse_anim_main"] = { "anim_type": "scale", "from": 1.0, "to": 1.05, "duration": 0.7, "next": "@custom_ui.pulse_anim_rev", "easing": "ease_in_out" };
-                     finalJson["pulse_anim_rev"] = { "anim_type": "scale", "from": 1.05, "to": 1.0, "duration": 0.7, "next": "@custom_ui.pulse_anim_main", "easing": "ease_in_out" };
-                }
-
-                const jsonString = JSON.stringify(finalJson, null, 2);
-                if (withSyntaxHighlighting) {
-                    return jsonString.replace(/("(\\u[a-zA-Z0-9]{4}|\\[^u]|[^\\"])*"(\s*:)?|\b(true|false|null)\b|-?\d+(?:\.\d*)?(?:[eE][+\-]?\d+)?)/g, (match) => {
-                        let cls = 'number';
-                        if (/^"/.test(match)) cls = /:$/.test(match) ? 'key' : 'string';
-                        else if (/true|false|null/.test(match)) cls = 'boolean';
-                        return `<span class="${cls}">${match}</span>`;
-                    });
-                }
-                return jsonString;
-            }
-
-            exportBtn.addEventListener('click', () => {
-                 const zip = new JSZip();
-                 const manifest = {
-                    "format_version": 2, "header": { "name": "Custom UI Pack by Generator", "description": "A resource pack with custom UI.", "uuid": crypto.randomUUID(), "version": [1, 0, 0], "min_engine_version": [1, 19, 0] },
-                    "modules": [{ "type": "resources", "uuid": crypto.randomUUID(), "version": [1, 0, 0] }]
-                 };
-                 zip.file("manifest.json", JSON.stringify(manifest, null, 2));
-                 zip.file("ui/custom_screen.json", generateJson(false));
-                 zip.folder("textures/ui");
-                 zip.file("pack_icon.png", "iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAYAAACqaXHeAAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAJcEhZcwAADsMAAA7DAcdvqGQAAABTSURBVHja7cExAQAAAMKg9U9tCF8gAAAAAAAAAAAAAABsYgEAAAAAAAAAAAAAAAC2sAAAAAAAAAAAAAAAALCNAQAAAAAAAAAAAAAAYBsDAAAAAAAAAAAAAADANgYAAAAAAAAAAAAAAMA2BvwGAASvAcw4Q0EWAAAAAElFTkSuQmCC", {base64: true});
-                 zip.generateAsync({type:"blob"}).then(content => saveAs(content, "CustomUIPack.mcpack"));
-            });
-            
-            renderAll();
-            updateInspector();
-
-        } catch (e) {
-            console.error("GUI 생성기 초기화 중 치명적인 오류 발생:", e);
-            const app = document.getElementById('app');
-            if (app) {
-                app.innerHTML = `
-                    <div class="w-full h-full flex items-center justify-center bg-red-800 text-white p-8">
-                        <div class="text-center">
-                            <h1 class="text-3xl font-bold mb-4">오류가 발생했습니다!</h1>
-                            <p class="mb-2">앱을 불러오는 데 실패했습니다. 개발자 콘솔(F12)을 확인해주세요.</p>
-                            <p class="text-sm font-mono bg-red-900 p-2 rounded">${e.toString()}</p>
-                        </div>
-                    </div>`;
-            }
+          const midi = new window.Midi(e.target.result);
+          setMidiData(midi);
+          const initialMapping = {};
+          midi.tracks.forEach((track, index) => {
+            const trackName = track.instrument.name.toLowerCase();
+            const foundSound = MINECRAFT_SOUNDS.find(s => trackName.includes(s.split('.')[1])) || MINECRAFT_SOUNDS[index % MINECRAFT_SOUNDS.length];
+            initialMapping[index] = foundSound;
+          });
+          setInstrumentMapping(initialMapping);
+          setShowInstructions(false);
+        } catch (error) {
+          console.error("MIDI 파일 파싱 오류:", error);
+          setLoadingError("유효하지 않은 MIDI 파일입니다.");
         }
+        setIsLoading(false);
+      };
+      reader.readAsArrayBuffer(file);
+    }
+  };
+
+  // --- 악기 매핑 변경 ---
+  const handleInstrumentChange = (trackIndex, sound) => {
+    setInstrumentMapping(prev => ({ ...prev, [trackIndex]: sound }));
+  };
+
+  // --- 재생/일시정지/정지 로직 ---
+  const schedulePlayback = useCallback(() => {
+    if (!midiData || !areSoundsLoaded) return;
+    scheduledEvents.current.forEach(id => Tone.Transport.clear(id));
+    scheduledEvents.current = [];
+    midiData.tracks.forEach((track, trackIndex) => {
+      const instrument = instrumentMapping[trackIndex];
+      if (instrument && players.has(instrument)) {
+        track.notes.forEach(note => {
+          const eventId = Tone.Transport.scheduleOnce(time => {
+            const player = players.player(instrument);
+            if(player.loaded) {
+                player.playbackRate = calculatePitch(note.midi);
+                player.start(time, 0, note.duration);
+            }
+          }, note.time);
+          scheduledEvents.current.push(eventId);
+        });
+      }
     });
-    </script>
-</body>
-</html>
+  }, [midiData, areSoundsLoaded, instrumentMapping, players]);
+
+  const togglePlayback = () => {
+    if (!areSoundsLoaded) {
+        alert("사운드 파일이 로드되지 않아 미리듣기를 할 수 없습니다.");
+        return;
+    }
+    if (playbackState === 'playing') {
+      Tone.Transport.pause();
+      setPlaybackState('paused');
+    } else {
+      schedulePlayback();
+      Tone.Transport.start();
+      setPlaybackState('playing');
+    }
+  };
+
+  const stopPlayback = () => {
+    Tone.Transport.stop();
+    if (players && typeof players.stopAll === 'function') {
+        players.stopAll();
+    }
+    Tone.Transport.position = 0;
+    setPlaybackState('stopped');
+  };
+  
+  useEffect(() => {
+    const onStop = () => setPlaybackState('stopped');
+    Tone.Transport.on('stop', onStop);
+    return () => Tone.Transport.off('stop', onStop);
+  }, []);
+
+  // --- .mcfunction 파일 생성 및 내보내기 ---
+  const exportMcFunction = async () => {
+    if (!midiData || !librariesLoaded) return;
+    setIsExporting(true);
+    const zip = new window.JSZip();
+    const folderName = fileName.replace(/[^a-z0-9]/gi, '_').toLowerCase() || 'minecraft_music';
+    const musicFolder = zip.folder(folderName);
+    const ticks = {};
+    let maxTick = 0;
+    midiData.tracks.forEach((track, trackIndex) => {
+      const sound = instrumentMapping[trackIndex];
+      if (!sound) return;
+      track.notes.forEach(note => {
+        const tick = Math.round(note.time * 20);
+        const pitch = calculatePitch(note.midi).toFixed(4);
+        const command = `playsound ${sound} @a ~~~ 1.0 ${pitch}`;
+        if (!ticks[tick]) ticks[tick] = [];
+        ticks[tick].push(command);
+        if (tick > maxTick) maxTick = tick;
+      });
+    });
+    musicFolder.file('setup.mcfunction', 'scoreboard objectives add musicTimer dummy "Music Timer"');
+    let playFunctionContent = `scoreboard players add @a[tag=${folderName}] musicTimer 1\n`;
+    for (let i = 0; i <= maxTick; i++) {
+        if(ticks[i]){
+            playFunctionContent += `execute as @a[scores={musicTimer=${i}}] at @s run function ${folderName}/tick_${i}\n`;
+        }
+    }
+    playFunctionContent += `scoreboard players reset @a[tag=${folderName},scores={musicTimer=${maxTick+1}..}] musicTimer`;
+    musicFolder.file('play.mcfunction', playFunctionContent);
+    for (const tick in ticks) {
+      musicFolder.file(`tick_${tick}.mcfunction`, ticks[tick].join('\n'));
+    }
+    const readmeContent = `마인크래프트 음악 팩 사용법 (${folderName})\n\n이 팩은 마인크래프트 베드락 에디션에서 생성된 음악을 재생하기 위한 함수 팩입니다.\n\n**설치 방법:**\n\n1. 이 ZIP 파일의 압축을 해제합니다. '${folderName}' 폴더가 생성됩니다.\n2. 마인크래프트 월드의 'behavior_packs' 폴더에 '${folderName}' 폴더를 복사하여 붙여넣습니다.\n   - Windows 10/11: %localappdata%\\Packages\\Microsoft.MinecraftUWP_8wekyb3d8bbwe\\LocalState\\games\\com.mojang\\behavior_packs\n3. 마인크래프트 월드 설정 > 동작 팩 > 사용 가능에서 '${folderName}' 팩을 활성화합니다.\n\n**사용 방법:**\n\n1. 게임에 접속하여 채팅창에 다음 명령어를 입력하여 초기 설정을 합니다. (최초 1회)\n   /function ${folderName}/setup\n\n2. 음악을 재생할 플레이어에게 태그를 부여합니다.\n   /tag @s add ${folderName}\n\n3. 다음 명령어를 반복 커맨드 블록에 넣고 '항상 활성'으로 설정합니다.\n   /function ${folderName}/play\n\n4. 음악을 멈추고 싶으면 플레이어에게서 태그를 제거하거나 반복 커맨드 블록을 비활성화하세요.\n   /tag @s remove ${folderName}\n   /scoreboard players reset @s musicTimer`;
+    musicFolder.file('README.txt', readmeContent);
+    const content = await zip.generateAsync({ type: 'blob' });
+    window.saveAs(content, `${folderName}.zip`);
+    setIsExporting(false);
+  };
+
+  return (
+    <div className="bg-gray-800 text-white min-h-screen font-sans flex flex-col">
+      <header className="bg-gray-900 p-4 shadow-lg flex justify-between items-center">
+        <div className="flex items-center gap-3">
+          <Music className="text-blue-400" size={32} />
+          <div>
+            <h1 className="text-xl font-bold">MCBE MIDI 변환 스튜디오</h1>
+            <p className="text-xs text-gray-400">MIDI를 마인크래프트 playsound 명령어로</p>
+          </div>
+        </div>
+        <div className="flex items-center gap-4">
+          <label htmlFor="midi-upload" className={`bg-blue-600 font-bold py-2 px-4 rounded-lg flex items-center gap-2 transition-colors ${!librariesLoaded ? 'cursor-not-allowed bg-gray-500' : 'hover:bg-blue-700 cursor-pointer'}`}>
+            <Upload size={20} /> MIDI 업로드
+          </label>
+          <input type="file" id="midi-upload" accept=".mid,.midi" className="hidden" onChange={handleFileChange} disabled={!librariesLoaded} />
+        </div>
+      </header>
+
+      {isLoading && (
+        <div className="absolute inset-0 bg-gray-900 bg-opacity-75 flex flex-col justify-center items-center z-50">
+          <Loader2 className="animate-spin text-blue-400" size={64} />
+          <p className="mt-4 text-lg">초기화 중...</p>
+        </div>
+      )}
+       {isExporting && (
+        <div className="absolute inset-0 bg-gray-900 bg-opacity-75 flex flex-col justify-center items-center z-50">
+          <Loader2 className="animate-spin text-blue-400" size={64} />
+          <p className="mt-4 text-lg">McFunction 파일들을 생성 중입니다...</p>
+        </div>
+      )}
+      
+      <main className="flex-grow p-4 md:p-6 lg:p-8 flex flex-col md:flex-row gap-6">
+        {loadingError && !isLoading && (
+            <div className="w-full flex flex-col items-center justify-center text-center bg-red-900/50 p-8 rounded-lg">
+                <AlertTriangle className="text-red-400" size={48} />
+                <h2 className="mt-4 text-2xl font-bold">오류 발생</h2>
+                <p className="mt-2 text-red-300">{loadingError}</p>
+                <p className="mt-2 text-sm text-gray-400">네트워크 연결을 확인하거나 잠시 후 페이지를 새로고침 해주세요.</p>
+            </div>
+        )}
+
+        {!loadingError && midiData ? (
+          <>
+            <div className="w-full md:w-1/3 lg:w-1/4 bg-gray-800/50 rounded-lg shadow-xl p-4 flex flex-col">
+              <h2 className="text-lg font-semibold border-b border-gray-600 pb-2 mb-4">{fileName || "MIDI 정보"}</h2>
+              <div className="bg-gray-700 p-3 rounded-lg flex justify-around items-center mb-4">
+                  <button onClick={togglePlayback} disabled={!areSoundsLoaded} className="p-3 bg-blue-600 rounded-full text-white hover:bg-blue-500 disabled:bg-gray-500 disabled:cursor-not-allowed transition-all transform hover:scale-110" title={!areSoundsLoaded ? "사운드 로딩 실패" : "재생/일시정지"}>
+                      {playbackState === 'playing' ? <Pause size={24} /> : <Play size={24} />}
+                  </button>
+                  <button onClick={stopPlayback} disabled={!areSoundsLoaded} className="p-3 bg-red-600 rounded-full text-white hover:bg-red-500 disabled:bg-gray-500 disabled:cursor-not-allowed transition-all transform hover:scale-110" title={!areSoundsLoaded ? "사운드 로딩 실패" : "정지"}>
+                      <Square size={24} />
+                  </button>
+              </div>
+              <div className="flex border-b border-gray-600 mb-2">
+                  <button onClick={() => setActiveTab('tracks')} className={`py-2 px-4 flex items-center gap-2 ${activeTab === 'tracks' ? 'border-b-2 border-blue-400 text-blue-300' : 'text-gray-400'}`}>
+                      <ListMusic size={18}/> 트랙 목록
+                  </button>
+                  <button onClick={() => setActiveTab('export')} className={`py-2 px-4 flex items-center gap-2 ${activeTab === 'export' ? 'border-b-2 border-blue-400 text-blue-300' : 'text-gray-400'}`}>
+                      <FileDown size={18}/> 내보내기
+                  </button>
+              </div>
+              {activeTab === 'tracks' && (
+                <div className="flex-grow overflow-y-auto pr-2">
+                  <p className="text-sm text-gray-400 mb-3">각 트랙에 마인크래프트 사운드를 지정하세요.</p>
+                  {midiData.tracks.map((track, index) => (
+                    <div key={index} className="mb-3 p-3 bg-gray-700 rounded-lg">
+                      <p className="font-bold truncate" title={track.name || `트랙 ${index + 1}`}>{track.instrument.name || `트랙 ${index + 1}`}</p>
+                      <p className="text-xs text-gray-400 mb-2">{track.notes.length}개의 노트</p>
+                      <select value={instrumentMapping[index] || ''} onChange={(e) => handleInstrumentChange(index, e.target.value)} className="w-full p-2 bg-gray-600 border border-gray-500 rounded-md text-white focus:outline-none focus:ring-2 focus:ring-blue-500">
+                        {MINECRAFT_SOUNDS.map(sound => (<option key={sound} value={sound}>{sound}</option>))}
+                      </select>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {activeTab === 'export' && (
+                  <div className="flex-grow flex flex-col justify-center items-center">
+                      <p className="text-center text-gray-300 mb-4">설정이 완료되었으면 .mcfunction 팩으로 내보내세요.</p>
+                      <button onClick={exportMcFunction} className="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-4 rounded-lg flex items-center justify-center gap-2 transition-colors">
+                          <FileDown size={20} /> ZIP으로 내보내기
+                      </button>
+                  </div>
+              )}
+            </div>
+            <div className="w-full md:w-2/3 lg:w-3/4 bg-gray-900/50 rounded-lg shadow-xl p-4 overflow-hidden">
+              <h3 className="text-lg font-semibold border-b border-gray-600 pb-2 mb-4">피아노 롤 (미리보기)</h3>
+              <PianoRoll midiData={midiData} playbackState={playbackState} />
+            </div>
+          </>
+        ) : (
+          <div className="flex-grow flex justify-center items-center">
+            {!isLoading && !loadingError && showInstructions && (
+              <div className="text-center bg-gray-900/50 p-10 rounded-xl shadow-2xl max-w-2xl">
+                <Music size={48} className="mx-auto text-blue-400 mb-4" />
+                <h2 className="text-3xl font-bold mb-2">마인크래프트 MIDI 변환 스튜디오에 오신 것을 환영합니다!</h2>
+                <p className="text-gray-300 mb-6">가지고 있는 MIDI 파일을 마인크래프트 베드락 에디션에서 재생할 수 있는 함수 팩으로 변환해보세요.</p>
+                <div className="text-left bg-gray-800 p-4 rounded-lg border border-gray-700">
+                    <h3 className="font-semibold text-lg mb-2 flex items-center gap-2"><Info size={20} /> 사용 방법</h3>
+                    <ol className="list-decimal list-inside space-y-2 text-gray-400">
+                        <li><span className="font-semibold text-white">MIDI 업로드:</span> 오른쪽 상단의 'MIDI 업로드' 버튼을 클릭하여 파일을 선택합니다.</li>
+                        <li><span className="font-semibold text-white">악기 지정:</span> 왼쪽 패널에 표시된 각 트랙에 원하는 마인크래프트 소리를 할당합니다.</li>
+                        <li><span className="font-semibold text-white">미리듣기:</span> 재생 버튼을 눌러 변환된 음악을 웹에서 직접 들어봅니다.</li>
+                        <li><span className="font-semibold text-white">내보내기:</span> '내보내기' 탭에서 ZIP 파일로 다운로드하여 마인크래프트 월드에 적용합니다.</li>
+                    </ol>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+      </main>
+    </div>
+  );
+}
+
+// --- 피아노 롤 컴포넌트 ---
+function PianoRoll({ midiData, playbackState }) {
+  const containerRef = useRef(null);
+  const [dimensions, setDimensions] = useState({ width: 0, height: 0 });
+  const notes = midiData?.tracks.flatMap((track, trackIndex) => track.notes.map(note => ({...note, trackIndex}))) || [];
+  const minMidi = notes.length > 0 ? Math.min(...notes.map(n => n.midi)) : 21;
+  const maxMidi = notes.length > 0 ? Math.max(...notes.map(n => n.midi)) : 108;
+  const totalDuration = midiData?.duration || 1;
+  const keyHeight = Math.max(1, dimensions.height / (maxMidi - minMidi + 1));
+  const timeScale = dimensions.width / totalDuration;
+  const [currentTime, setCurrentTime] = useState(0);
+
+  useEffect(() => {
+    const updateDimensions = () => {
+      if (containerRef.current) {
+        setDimensions({ width: containerRef.current.offsetWidth, height: containerRef.current.offsetHeight });
+      }
+    };
+    updateDimensions();
+    window.addEventListener('resize', updateDimensions);
+    return () => window.removeEventListener('resize', updateDimensions);
+  }, []);
+  
+  useEffect(() => {
+    let animationFrameId;
+    const animate = () => {
+      if (playbackState === 'playing') {
+        setCurrentTime(Tone.Transport.seconds);
+        animationFrameId = requestAnimationFrame(animate);
+      }
+    };
+    if (playbackState === 'playing') {
+      animationFrameId = requestAnimationFrame(animate);
+    } else {
+      if(animationFrameId) cancelAnimationFrame(animationFrameId);
+      if (playbackState === 'stopped') setCurrentTime(0);
+    }
+    return () => { if(animationFrameId) cancelAnimationFrame(animationFrameId) };
+  }, [playbackState]);
+
+  const trackColors = ['#3b82f6', '#ef4444', '#22c55e', '#eab308', '#8b5cf6', '#ec4899', '#14b8a6', '#f97316', '#6366f1', '#d946ef'];
+
+  return (
+    <div ref={containerRef} className="w-full h-full bg-gray-800 rounded-lg overflow-auto relative">
+      <svg width={dimensions.width} height={dimensions.height} className="absolute top-0 left-0">
+        <defs>
+          <pattern id="grid" width={timeScale > 0 ? timeScale : 1} height={keyHeight * 12} patternUnits="userSpaceOnUse">
+             <path d={`M ${timeScale} 0 L 0 0 0 ${keyHeight * 12}`} fill="none" stroke="rgba(255,255,255,0.05)" strokeWidth="1"/>
+          </pattern>
+          <pattern id="piano-keys" width="100" height={keyHeight * 12} patternUnits="userSpaceOnUse">
+            {[...Array(12).keys()].map(i => {
+              const isBlackKey = [1, 3, 6, 8, 10].includes(i % 12);
+              return <rect key={i} y={i * keyHeight} width="100" height={keyHeight} fill={isBlackKey ? 'rgba(0,0,0,0.2)' : 'rgba(255,255,255,0.02)'} />
+            })}
+          </pattern>
+        </defs>
+        <rect width="100%" height="100%" fill="url(#piano-keys)" />
+        <rect width="100%" height="100%" fill="url(#grid)" />
+        {notes.map((note, i) => {
+          const y = (maxMidi - note.midi) * keyHeight;
+          const x = note.time * timeScale;
+          const width = note.duration * timeScale;
+          const color = trackColors[note.trackIndex % trackColors.length];
+          return (
+            <rect key={i} x={x} y={y} width={Math.max(1, width)} height={keyHeight} fill={color} rx="2" ry="2" className="opacity-80 hover:opacity-100 transition-opacity">
+              <title>{`트랙: ${midiData.tracks[note.trackIndex].instrument.name}, 노트: ${note.name}, 시간: ${note.time.toFixed(2)}s`}</title>
+            </rect>
+          );
+        })}
+        <line x1={currentTime * timeScale} y1="0" x2={currentTime * timeScale} y2={dimensions.height} stroke="#facc15" strokeWidth="2" style={{ display: playbackState === 'stopped' ? 'none' : 'block' }} />
+      </svg>
+    </div>
+  );
+}
