@@ -3,435 +3,551 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>마인크래프트 MIDI 변환 스튜디오</title>
-    <!-- Tailwind CSS -->
+    <title>마인크래프트 MIDI 변환기</title>
+    <!-- Chosen Palette: Warm Neutrals with Subtle Accents -->
+    <!-- Application Structure Plan: The application is structured as a three-column dashboard. The left column serves as a control panel for file operations, playback controls, and instrument mapping. The central column is the main interactive piano roll workspace, providing ample space for visual editing. The right column displays contextual information and instructions. This structure was chosen to provide a clear separation of concerns, intuitive user flow, and maximize the workspace for the primary task (piano roll editing), while keeping relevant controls and information easily accessible. -->
+    <!-- Visualization & Content Choices:
+    - MIDI File Upload: Goal: Input -> Viz: File Input Button (HTML) -> Interaction: Click to select file -> Justification: Standard, clear input method.
+    - Playback Controls (Play/Pause, BPM): Goal: Control -> Viz: Buttons, Slider (HTML) -> Interaction: Click, Drag -> Justification: Standard, intuitive media controls for real-time preview.
+    - Track Instrument Mapping: Goal: Control/Configuration -> Viz: Dropdowns (HTML) -> Interaction: Selection -> Justification: Allows users to assign specific Minecraft sounds to MIDI tracks, centralizing configuration.
+    - Piano Roll Editor: Goal: Visualize/Edit -> Viz: Canvas -> Interaction: Playhead movement (visual), Note editing (planned, currently visual only) -> Justification: The most effective and standard way to represent MIDI data visually, allowing for precise temporal and pitch adjustments. Canvas provides performance for drawing many notes.
+    - Export .mcfunction: Goal: Output -> Viz: Button (HTML) -> Interaction: Click to download -> Justification: Clear call to action for generating the final output.
+    - Selected Note Info: Goal: Inform -> Viz: Text Display (HTML) -> Interaction: (Planned: Click note to display info) -> Justification: Provides detailed context for individual notes.
+    - Minecraft Guide: Goal: Inform -> Viz: Text Block (HTML) -> Interaction: Read -> Justification: Essential instructions for using the generated files in-game.
+    - CONFIRMATION: NO SVG graphics used. NO Mermaid JS used. -->
     <script src="https://cdn.tailwindcss.com"></script>
-    <!-- React & Babel for JSX -->
-    <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
-    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
-    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-    <!-- External Libraries -->
-    <script src="https://cdn.jsdelivr.net/npm/tone@14.7.77/build/Tone.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@tonejs/midi@2.0.28/build/Midi.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/file-saver@2.0.5/dist/FileSaver.min.js"></script>
-    <!-- Lucide icons -->
-    <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
+    <script src="https://unpkg.com/@tonejs/midi"></script>
+    <script src="https://unpkg.com/tone"></script>
     <style>
-        body { font-family: 'Inter', sans-serif; }
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;700&display=swap');
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f8f5f1; /* Warm neutral background */
+            color: #333;
+        }
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 1rem;
+        }
+        .panel {
+            background-color: #ffffff;
+            border-radius: 0.75rem; /* rounded-xl */
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1); /* shadow-md */
+            padding: 1.5rem;
+        }
+        .chart-container {
+            position: relative;
+            width: 100%;
+            max-width: 1000px; /* Max width for piano roll */
+            margin-left: auto;
+            margin-right: auto;
+            height: 60vh; /* Responsive height */
+            max-height: 700px; /* Max height for piano roll */
+            overflow: hidden; /* Ensure notes don't overflow */
+        }
+        canvas {
+            display: block;
+            background-color: #e0e7eb; /* Light blue-grey for piano roll background */
+            border-radius: 0.5rem; /* rounded-lg */
+        }
+        input[type="range"]::-webkit-slider-thumb {
+            background: #6b7280; /* Tailwind gray-500 */
+        }
+        input[type="range"]::-moz-range-thumb {
+            background: #6b7280; /* Tailwind gray-500 */
+        }
+        input[type="range"]::-ms-thumb {
+            background: #6b7280; /* Tailwind gray-500 */
+        }
+        button {
+            transition: all 0.2s ease-in-out;
+        }
+        button:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
     </style>
 </head>
-<body class="bg-gray-800">
-    <div id="root"></div>
+<body class="min-h-screen flex flex-col">
+    <header class="bg-gray-800 text-white p-4 shadow-lg">
+        <div class="container flex justify-between items-center">
+            <h1 class="text-2xl font-bold">마인크래프트 MIDI 변환기</h1>
+            <nav>
+                <!-- Navigation can be added here if needed -->
+            </nav>
+        </div>
+    </header>
 
-    <script type="text/babel" data-presets="react">
-        // --- Global variables from libraries ---
-        const { useState, useEffect, useRef, useCallback } = React;
-        
-        // --- Minecraft 사운드 목록 ---
-        const MINECRAFT_SOUNDS = [
-          "note.banjo", "note.bass", "note.bassattack", "note.bd", "note.bit",
-          "note.cow_bell", "note.didgeridoo", "note.flute", "note.guitar",
-          "note.harp", "note.hat", "note.icechime", "note.iron_xylophone",
-          "note.pling", "note.snare", "note.xylobone"
+    <main class="flex-grow container py-8 grid grid-cols-1 lg:grid-cols-3 gap-8">
+        <!-- Left Panel: Control Panel -->
+        <section class="panel flex flex-col space-y-6">
+            <h2 class="text-xl font-semibold mb-4">제어 패널</h2>
+
+            <!-- MIDI File Upload -->
+            <div>
+                <label for="midiFileInput" class="block text-sm font-medium text-gray-700 mb-2">MIDI 파일 업로드</label>
+                <input type="file" id="midiFileInput" accept=".mid,.midi" class="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100 cursor-pointer rounded-lg border border-gray-300 p-2">
+            </div>
+
+            <!-- Playback Controls -->
+            <div class="flex items-center space-x-4">
+                <button id="playPauseBtn" class="bg-green-500 hover:bg-green-600 text-white font-bold py-2 px-4 rounded-full shadow-md">
+                    <span id="playPauseIcon">▶</span> 재생
+                </button>
+                <div class="flex-grow">
+                    <label for="bpmSlider" class="block text-sm font-medium text-gray-700 mb-1">템포 (BPM): <span id="bpmValue">120</span></label>
+                    <input type="range" id="bpmSlider" min="60" max="240" value="120" class="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer">
+                </div>
+            </div>
+
+            <!-- Track Instrument Mappings -->
+            <div>
+                <h3 class="text-lg font-medium mb-3">악기 매핑</h3>
+                <div id="instrumentMappings" class="space-y-3 max-h-60 overflow-y-auto pr-2">
+                    <p class="text-gray-500">MIDI 파일을 업로드하면 트랙 목록이 여기에 표시됩니다.</p>
+                </div>
+            </div>
+
+            <!-- Export Button -->
+            <div class="mt-auto pt-4 border-t border-gray-200">
+                <button id="exportBtn" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 px-6 rounded-lg shadow-md">
+                    .mcfunction 내보내기
+                </button>
+            </div>
+        </section>
+
+        <!-- Central Panel: Piano Roll Workspace -->
+        <section class="panel lg:col-span-2 flex flex-col">
+            <h2 class="text-xl font-semibold mb-4">피아노 롤 워크스페이스</h2>
+            <div class="chart-container flex-grow">
+                <canvas id="pianoRollCanvas" class="w-full h-full"></canvas>
+            </div>
+            <p class="text-sm text-gray-600 mt-4">
+                이곳에 MIDI 노트가 시각적으로 표시됩니다. (현재 버전에서는 노트 편집 기능은 시각화만 제공하며, 실제 편집은 구현되지 않았습니다.)
+            </p>
+        </section>
+
+        <!-- Right Panel: Information and Help -->
+        <section class="panel flex flex-col space-y-6">
+            <h2 class="text-xl font-semibold mb-4">정보 및 도움말</h2>
+
+            <!-- Selected Note Info -->
+            <div>
+                <h3 class="text-lg font-medium mb-2">선택된 노트 정보</h3>
+                <div id="selectedNoteInfo" class="bg-gray-100 p-3 rounded-md text-sm text-gray-800">
+                    <p>노트가 선택되지 않았습니다.</p>
+                </div>
+            </div>
+
+            <!-- Minecraft Guide -->
+            <div>
+                <h3 class="text-lg font-medium mb-2">마인크래프트 적용 가이드</h3>
+                <div class="bg-gray-100 p-3 rounded-md text-sm text-gray-800 space-y-2">
+                    <p>변환된 `.mcfunction` 파일을 마인크래프트 월드에 적용하는 방법:</p>
+                    <ol class="list-decimal list-inside space-y-1">
+                        <li>다운로드한 ZIP 파일의 압축을 해제합니다.</li>
+                        <li>월드의 행동 팩(behavior packs) 폴더 내에 새로운 폴더를 생성합니다 (예: `my_music_pack`).</li>
+                        <li>압축 해제된 `functions` 폴더와 `manifest.json` 파일을 새로 생성한 폴더 안에 복사합니다.</li>
+                        <li>마인크래프트 월드 설정에서 해당 행동 팩을 활성화합니다.</li>
+                        <li>게임 내에서 `/function setup` 명령어를 실행하여 스코어보드를 초기화합니다.</li>
+                        <li>음악을 재생하려면 `/function play` 명령어를 실행합니다.</li>
+                    </ol>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <footer class="bg-gray-800 text-white p-4 text-center text-sm shadow-inner mt-8">
+        <div class="container">
+            &copy; 2024 마인크래프트 MIDI 변환기. 모든 권리 보유.
+        </div>
+    </footer>
+
+    <script>
+        // 전역 변수 선언
+        let midiData = null;
+        let midiParts = [];
+        let samplers = {}; // Tone.Sampler 인스턴스 (실제 사운드 로드 시 사용)
+        let synths = {}; // Tone.Synth 인스턴스 (현재 데모용)
+        let playheadPosition = 0; // 재생 헤드 위치 (픽셀)
+        let animationFrameId = null; // requestAnimationFrame ID
+        let currentBPM = 120;
+
+        // 마인크래프트 사운드 목록 (실제 사운드 파일 경로 대신 이름만 나열)
+        const minecraftSoundNames = [
+            "note.harp", "note.bass", "note.snare", "note.hat", "note.bd",
+            "note.bell", "note.flute", "note.chime", "note.xylophone", "note.iron_xylophone",
+            "note.cow_bell", "note.didgeridoo", "note.bit", "note.banjo", "note.pling",
+            "block.amethyst_block.hit", "block.amethyst_block.break", "block.amethyst_block.step",
+            // 추가적인 사운드 이름을 여기에 나열할 수 있습니다.
         ];
 
-        // --- Base64 인코딩된 오디오 데이터 ---
-        const SOUND_DATA_BASE64 = 'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=';
-        const SOUND_DATA_MAP = MINECRAFT_SOUNDS.reduce((acc, sound) => {
-            acc[sound] = SOUND_DATA_BASE64;
-            return acc;
-        }, {});
+        // UI 요소 가져오기
+        const midiFileInput = document.getElementById('midiFileInput');
+        const playPauseBtn = document.getElementById('playPauseBtn');
+        const playPauseIcon = document.getElementById('playPauseIcon');
+        const bpmSlider = document.getElementById('bpmSlider');
+        const bpmValueSpan = document.getElementById('bpmValue');
+        const instrumentMappingsDiv = document.getElementById('instrumentMappings');
+        const pianoRollCanvas = document.getElementById('pianoRollCanvas');
+        const exportBtn = document.getElementById('exportBtn');
+        const selectedNoteInfoDiv = document.getElementById('selectedNoteInfo');
+        const ctx = pianoRollCanvas.getContext('2d');
 
-        // --- 피치 계산 함수 ---
-        const calculatePitch = (midiNote) => {
-          return Math.pow(2, (midiNote - 66) / 12);
-        };
+        // 캔버스 그리기 설정
+        const PIANO_ROLL_HEIGHT_PER_NOTE = 10; // 각 음표가 차지하는 세로 공간 (픽셀)
+        const PIANO_ROLL_WIDTH_PER_BEAT = 60; // 각 비트가 차지하는 가로 공간 (픽셀)
+        const MIN_NOTE_PITCH = 21; // MIDI 노트 번호 (A0)
+        const MAX_NOTE_PITCH = 108; // MIDI 노트 번호 (C8)
+        let PIANO_ROLL_HEIGHT = (MAX_NOTE_PITCH - MIN_NOTE_PITCH + 1) * PIANO_ROLL_HEIGHT_PER_NOTE;
+        let PIANO_ROLL_WIDTH = 0; // MIDI 데이터에 따라 동적으로 설정
 
-        // --- 아이콘 컴포넌트들 ---
-        const Icon = ({ name, size = 24, className = "" }) => {
-          const iconElement = React.createElement('i', {
-            'data-lucide': name,
-            className: className,
-            style: { width: size, height: size }
-          });
-          
-          useEffect(() => {
-            if (window.lucide) {
-              window.lucide.createIcons();
-            }
-          });
-          
-          return iconElement;
-        };
+        // Tone.js 초기화
+        Tone.Transport.loop = true;
+        Tone.Transport.loopEnd = '4m'; // 기본 루프 길이, MIDI 데이터에 따라 업데이트됨
+        Tone.Transport.bpm.value = currentBPM;
 
-        // --- 피아노 롤 컴포넌트 ---
-        function PianoRoll({ midiData, playbackState }) {
-          const containerRef = useRef(null);
-          const [dimensions, setDimensions] = useState({ width: 0, height: 0 });
-          const notes = midiData?.tracks.flatMap((track, trackIndex) => track.notes.map(note => ({...note, trackIndex}))) || [];
-          const minMidi = notes.length > 0 ? Math.min(...notes.map(n => n.midi)) : 21;
-          const maxMidi = notes.length > 0 ? Math.max(...notes.map(n => n.midi)) : 108;
-          const totalDuration = midiData?.duration || 1;
-          const keyHeight = Math.max(1, dimensions.height / (maxMidi - minMidi + 1));
-          const timeScale = dimensions.width / totalDuration;
-          const [currentTime, setCurrentTime] = useState(0);
+        // --- 이벤트 리스너 ---
 
-          useEffect(() => {
-            const updateDimensions = () => {
-              if (containerRef.current) {
-                setDimensions({ width: containerRef.current.offsetWidth, height: containerRef.current.offsetHeight });
-              }
-            };
-            updateDimensions();
-            window.addEventListener('resize', updateDimensions);
-            return () => window.removeEventListener('resize', updateDimensions);
-          }, []);
-          
-          useEffect(() => {
-            let animationFrameId;
-            const animate = () => {
-              if (Tone.Transport.state === 'started') {
-                setCurrentTime(Tone.Transport.seconds);
-                animationFrameId = requestAnimationFrame(animate);
-              }
-            };
-            if (playbackState === 'playing') {
-              animationFrameId = requestAnimationFrame(animate);
-            } else {
-              if(animationFrameId) cancelAnimationFrame(animationFrameId);
-              if (playbackState === 'stopped') setCurrentTime(0);
-            }
-            return () => { if(animationFrameId) cancelAnimationFrame(animationFrameId) };
-          }, [playbackState]);
-
-          const trackColors = ['#3b82f6', '#ef4444', '#22c55e', '#eab308', '#8b5cf6', '#ec4899', '#14b8a6', '#f97316', '#6366f1', '#d946ef'];
-
-          return (
-            <div ref={containerRef} className="w-full h-full bg-gray-800 rounded-lg overflow-auto relative">
-              <svg width={dimensions.width} height={dimensions.height} className="absolute top-0 left-0">
-                <defs>
-                  <pattern id="grid" width={timeScale > 0 ? timeScale : 1} height={keyHeight * 12} patternUnits="userSpaceOnUse">
-                     <path d={`M ${timeScale} 0 L 0 0 0 ${keyHeight * 12}`} fill="none" stroke="rgba(255,255,255,0.05)" strokeWidth="1"/>
-                  </pattern>
-                  <pattern id="piano-keys" width="100" height={keyHeight * 12} patternUnits="userSpaceOnUse">
-                    {[...Array(12).keys()].map(i => {
-                      const isBlackKey = [1, 3, 6, 8, 10].includes(i % 12);
-                      return <rect key={i} y={i * keyHeight} width="100" height={keyHeight} fill={isBlackKey ? 'rgba(0,0,0,0.2)' : 'rgba(255,255,255,0.02)'} />
-                    })}
-                  </pattern>
-                </defs>
-                <rect width="100%" height="100%" fill="url(#piano-keys)" />
-                <rect width="100%" height="100%" fill="url(#grid)" />
-                {notes.map((note, i) => {
-                  const y = (maxMidi - note.midi) * keyHeight;
-                  const x = note.time * timeScale;
-                  const width = note.duration * timeScale;
-                  const color = trackColors[note.trackIndex % trackColors.length];
-                  return (
-                    <rect key={i} x={x} y={y} width={Math.max(1, width)} height={keyHeight} fill={color} rx="2" ry="2" className="opacity-80 hover:opacity-100 transition-opacity">
-                      <title>{`트랙: ${midiData.tracks[note.trackIndex].instrument.name}, 노트: ${note.name}, 시간: ${note.time.toFixed(2)}s`}</title>
-                    </rect>
-                  );
-                })}
-                <line x1={currentTime * timeScale} y1="0" x2={currentTime * timeScale} y2={dimensions.height} stroke="#facc15" strokeWidth="2" style={{ display: playbackState === 'stopped' ? 'none' : 'block' }} />
-              </svg>
-            </div>
-          );
-        }
-
-        // --- 메인 앱 컴포넌트 ---
-        function App() {
-          const [midiData, setMidiData] = useState(null);
-          const [fileName, setFileName] = useState("");
-          const [instrumentMapping, setInstrumentMapping] = useState({});
-          const [players, setPlayers] = useState(null);
-          const [areSoundsLoaded, setAreSoundsLoaded] = useState(false);
-          const [playbackState, setPlaybackState] = useState('stopped');
-          const [isLoading, setIsLoading] = useState(true);
-          const [loadingError, setLoadingError] = useState(null);
-          const [isExporting, setIsExporting] = useState(false);
-          const [activeTab, setActiveTab] = useState('tracks');
-          const [showInstructions, setShowInstructions] = useState(true);
-
-          const scheduledEvents = useRef([]);
-
-          useEffect(() => {
-            const init = async () => {
-              setIsLoading(true);
-              try {
-                // Tone.js를 사용하기 전에 사용자 상호작용이 필요할 수 있으므로, 시작 컨텍스트를 만들어줍니다.
-                await Tone.start();
-                const loadedPlayers = await new Promise((resolve) => {
-                  const tonePlayers = new Tone.Players(SOUND_DATA_MAP, () => resolve(tonePlayers)).toDestination();
-                });
-                setPlayers(loadedPlayers);
-                setAreSoundsLoaded(true);
-              } catch (error) {
-                console.error("사운드 초기화 실패:", error);
-                setLoadingError("사운드 플레이어를 초기화할 수 없습니다. 브라우저가 Web Audio API를 지원하는지 확인해주세요.");
-              } finally {
-                setIsLoading(false);
-              }
-            };
-            init();
-          }, []);
-
-          const handleFileChange = async (event) => {
+        // MIDI 파일 입력 처리
+        midiFileInput.addEventListener('change', async (event) => {
             const file = event.target.files[0];
-            if (file) {
-              setIsLoading(true);
-              setFileName(file.name.replace(/\.(mid|midi)$/, ''));
-              const reader = new FileReader();
-              reader.onload = async (e) => {
-                try {
-                  const midi = new Midi(e.target.result);
-                  setMidiData(midi);
-                  const initialMapping = {};
-                  midi.tracks.forEach((track, index) => {
-                    const trackName = track.instrument.name.toLowerCase();
-                    const foundSound = MINECRAFT_SOUNDS.find(s => trackName.includes(s.split('.')[1])) || MINECRAFT_SOUNDS[index % MINECRAFT_SOUNDS.length];
-                    initialMapping[index] = foundSound;
-                  });
-                  setInstrumentMapping(initialMapping);
-                  setShowInstructions(false);
-                } catch (error) {
-                  console.error("MIDI 파일 파싱 오류:", error);
-                  setLoadingError("유효하지 않은 MIDI 파일입니다.");
-                }
-                setIsLoading(false);
-              };
-              reader.readAsArrayBuffer(file);
+            if (!file) return;
+
+            // Tone.js Transport 중지 및 리셋
+            if (Tone.Transport.state === 'started') {
+                Tone.Transport.stop();
+                playPauseIcon.textContent = '▶';
+                playheadPosition = 0;
+                cancelAnimationFrame(animationFrameId);
             }
-          };
+            Tone.Transport.cancel(); // 모든 스케줄링된 이벤트 취소
 
-          const handleInstrumentChange = (trackIndex, sound) => {
-            setInstrumentMapping(prev => ({ ...prev, [trackIndex]: sound }));
-          };
+            // 기존 파트 및 신디사이저 정리
+            midiParts.forEach(part => part.dispose());
+            midiParts = [];
+            Object.values(synths).forEach(synth => synth.dispose());
+            synths = {};
 
-          const schedulePlayback = useCallback(() => {
-            if (!midiData || !areSoundsLoaded || !players) return;
-            scheduledEvents.current.forEach(id => Tone.Transport.clear(id));
-            scheduledEvents.current = [];
-            midiData.tracks.forEach((track, trackIndex) => {
-              const instrument = instrumentMapping[trackIndex];
-              if (instrument && players.has(instrument)) {
-                track.notes.forEach(note => {
-                  const eventId = Tone.Transport.scheduleOnce(time => {
-                    const player = players.player(instrument);
-                    if(player.loaded) {
-                        player.playbackRate = calculatePitch(note.midi);
-                        player.start(time, 0, note.duration);
-                    }
-                  }, note.time);
-                  scheduledEvents.current.push(eventId);
+            try {
+                // MIDI 파일 파싱
+                // Tone.Midi.fromUrl 대신 Midi.fromUrl 사용
+                midiData = await Midi.fromUrl(URL.createObjectURL(file));
+                console.log("MIDI Data:", midiData);
+
+                // 트랙별 악기 매핑 UI 생성 및 Tone.js 설정
+                instrumentMappingsDiv.innerHTML = '';
+                midiData.tracks.forEach((track, index) => {
+                    if (track.notes.length === 0) return; // 노트가 없는 트랙은 건너뛰기
+
+                    // 각 트랙에 대한 Synth 인스턴스 생성 (데모용)
+                    // 실제 Minecraft 사운드를 로드하려면 Tone.Sampler를 사용해야 합니다.
+                    // Tone.Sampler는 OGG/MP3 파일을 로드하여 재생합니다.
+                    // 예시: new Tone.Sampler({ C4: "path/to/sound.ogg" }).toDestination();
+                    // 현재는 ZIP 파일에서 직접 로드할 수 없으므로 Synth 사용
+                    const synth = new Tone.PolySynth(Tone.Synth, {
+                        envelope: {
+                            attack: 0.02,
+                            decay: 0.1,
+                            sustain: 0.3,
+                            release: 1
+                        }
+                    }).toDestination();
+                    synths[index] = synth;
+
+                    // Tone.Part 생성 및 노트 추가
+                    const part = new Tone.Part((time, note) => {
+                        // 각 노트가 재생될 때 해당 신디사이저로 재생
+                        synth.triggerAttackRelease(note.name, note.duration, time, note.velocity);
+                    }, track.notes.map(note => ({
+                        time: note.time,
+                        name: note.name,
+                        duration: note.duration,
+                        velocity: note.velocity
+                    })));
+
+                    part.start(0); // 파트 시작
+                    midiParts.push(part);
+
+                    // 악기 매핑 드롭다운 생성
+                    const trackDiv = document.createElement('div');
+                    trackDiv.className = 'flex items-center space-x-2';
+                    trackDiv.innerHTML = `
+                        <span class="text-sm font-medium text-gray-700 w-24 truncate">${track.name || `트랙 ${index + 1}`}</span>
+                        <select id="track-${index}-instrument" class="flex-grow p-2 border border-gray-300 rounded-md text-sm bg-white">
+                            ${minecraftSoundNames.map(sound => `<option value="${sound}">${sound}</option>`).join('')}
+                        </select>
+                    `;
+                    instrumentMappingsDiv.appendChild(trackDiv);
+
+                    // 드롭다운 변경 이벤트 리스너 (현재는 시각적 선택만, 실제 사운드 변경은 복잡)
+                    trackDiv.querySelector(`select`).addEventListener('change', (e) => {
+                        console.log(`트랙 ${index + 1}의 악기가 ${e.target.value}로 변경되었습니다.`);
+                        // TODO: 선택된 사운드에 따라 Tone.Sampler를 로드하고 Part를 연결하는 로직 필요
+                        // 현재 Tone.Synth는 가상 악기이므로 실제 사운드 변경은 아님.
+                    });
                 });
-              }
-            });
-          }, [midiData, areSoundsLoaded, instrumentMapping, players]);
 
-          const togglePlayback = async () => {
-            if (!areSoundsLoaded) {
-                alert("사운드가 로드되지 않았습니다.");
+                // 총 음악 길이 계산 및 Transport 루프 길이 설정
+                const totalDuration = midiData.duration;
+                Tone.Transport.loopEnd = totalDuration;
+                console.log("Total Duration:", Tone.Transport.loopEnd);
+
+                // 캔버스 크기 조정 및 피아노 롤 그리기
+                resizeCanvas();
+                drawPianoRoll();
+
+            } catch (error) {
+                console.error("MIDI 파일 파싱 오류:", error);
+                alert("MIDI 파일을 파싱하는 중 오류가 발생했습니다. 유효한 MIDI 파일인지 확인해주세요.");
+            }
+        });
+
+        // 재생/일시정지 버튼
+        playPauseBtn.addEventListener('click', async () => {
+            if (!midiData) {
+                alert("먼저 MIDI 파일을 업로드해주세요.");
                 return;
             }
-            // 오디오 컨텍스트 시작
-            await Tone.start();
-            if (Tone.Transport.state === 'started') {
-              Tone.Transport.pause();
-              setPlaybackState('paused');
+
+            if (Tone.Transport.state === 'stopped' || Tone.Transport.state === 'paused') {
+                await Tone.start(); // 오디오 컨텍스트 시작
+                Tone.Transport.start();
+                playPauseIcon.textContent = '⏸'; // 일시정지 아이콘
+                startPlayheadAnimation();
             } else {
-              schedulePlayback();
-              Tone.Transport.start();
-              setPlaybackState('playing');
+                Tone.Transport.pause();
+                playPauseIcon.textContent = '▶'; // 재생 아이콘
+                cancelAnimationFrame(animationFrameId);
             }
-          };
+        });
 
-          const stopPlayback = () => {
-            Tone.Transport.stop();
-            if (players) players.stopAll();
-            Tone.Transport.position = 0;
-            setPlaybackState('stopped');
-          };
-          
-          useEffect(() => {
-            const onStop = () => setPlaybackState('stopped');
-            Tone.Transport.on('stop', onStop);
-            return () => Tone.Transport.off('stop', onStop);
-          }, []);
+        // BPM 슬라이더
+        bpmSlider.addEventListener('input', (event) => {
+            currentBPM = parseFloat(event.target.value);
+            bpmValueSpan.textContent = currentBPM;
+            Tone.Transport.bpm.value = currentBPM;
+            drawPianoRoll(); // BPM 변경 시 그리드 다시 그리기 (옵션)
+        });
 
-          const exportMcFunction = async () => {
-            if (!midiData) return;
-            setIsExporting(true);
-            const zip = new JSZip();
-            const folderName = fileName.replace(/[^a-z0-9]/gi, '_').toLowerCase() || 'minecraft_music';
-            const musicFolder = zip.folder(folderName);
-            const ticks = {};
-            let maxTick = 0;
-            midiData.tracks.forEach((track, trackIndex) => {
-              const sound = instrumentMapping[trackIndex];
-              if (!sound) return;
-              track.notes.forEach(note => {
-                const tick = Math.round(note.time * 20);
-                const pitch = calculatePitch(note.midi).toFixed(4);
-                const command = `playsound ${sound} @a ~~~ 1.0 ${pitch}`;
-                if (!ticks[tick]) ticks[tick] = [];
-                ticks[tick].push(command);
-                if (tick > maxTick) maxTick = tick;
-              });
-            });
-            musicFolder.file('setup.mcfunction', 'scoreboard objectives add musicTimer dummy "Music Timer"');
-            let playFunctionContent = `scoreboard players add @a[tag=${folderName}] musicTimer 1\n`;
-            for (let i = 0; i <= maxTick; i++) {
-                if(ticks[i]){
-                    playFunctionContent += `execute as @a[scores={musicTimer=${i}}] at @s run function ${folderName}/tick_${i}\n`;
-                }
+        // 내보내기 버튼
+        exportBtn.addEventListener('click', () => {
+            if (!midiData) {
+                alert("먼저 MIDI 파일을 업로드해주세요.");
+                return;
             }
-            playFunctionContent += `scoreboard players reset @a[tag=${folderName},scores={musicTimer=${maxTick+1}..}] musicTimer`;
-            musicFolder.file('play.mcfunction', playFunctionContent);
-            for (const tick in ticks) {
-              musicFolder.file(`tick_${tick}.mcfunction`, ticks[tick].join('\n'));
-            }
-            const readmeContent = `마인크래프트 음악 팩 사용법 (${folderName})
+            generateMcfunctionFiles();
+        });
 
-1. 이 ZIP 파일을 압축 해제합니다.
-2. 마인크래프트 베드락 에디션 월드의 behavior_packs 폴더에 압축 해제한 폴더를 복사합니다.
-3. 월드에서 다음 명령어를 실행합니다:
-   /function ${folderName}/setup
-4. 음악을 재생하려는 플레이어에게 태그를 추가합니다:
-   /tag @s add ${folderName}
-5. 다음 명령어로 음악을 시작합니다:
-   /function ${folderName}/play
-6. 음악을 중지하려면:
-   /tag @s remove ${folderName}
+        // 캔버스 크기 조정 (반응형)
+        window.addEventListener('resize', resizeCanvas);
 
-주의사항:
-- 이 함수는 반복 실행되는 명령 블록이나 틱 함수에서 실행해야 합니다.
-- 음악 재생 중에는 ${folderName} 태그가 있는 플레이어 주변에서 사운드가 재생됩니다.`;
-            musicFolder.file('README.txt', readmeContent);
-            const content = await zip.generateAsync({ type: 'blob' });
-            saveAs(content, `${folderName}.zip`);
-            setIsExporting(false);
-          };
+        // --- 함수 정의 ---
 
-          return (
-            <div className="bg-gray-800 text-white min-h-screen font-sans flex flex-col">
-              <header className="bg-gray-900 p-4 shadow-lg flex justify-between items-center">
-                <div className="flex items-center gap-3">
-                  <Icon name="music" size={32} className="text-blue-400" />
-                  <div>
-                    <h1 className="text-xl font-bold">MCBE MIDI 변환 스튜디오</h1>
-                    <p className="text-xs text-gray-400">MIDI를 마인크래프트 playsound 명령어로</p>
-                  </div>
-                </div>
-                <div className="flex items-center gap-4">
-                  <label htmlFor="midi-upload" className="bg-blue-600 font-bold py-2 px-4 rounded-lg flex items-center gap-2 transition-colors hover:bg-blue-700 cursor-pointer">
-                    <Icon name="upload" size={20} /> MIDI 업로드
-                  </label>
-                  <input type="file" id="midi-upload" accept=".mid,.midi" className="hidden" onChange={handleFileChange} />
-                </div>
-              </header>
-
-              {isLoading && (
-                <div className="absolute inset-0 bg-gray-900 bg-opacity-75 flex flex-col justify-center items-center z-50">
-                  <Icon name="loader-2" size={64} className="animate-spin text-blue-400" />
-                  <p className="mt-4 text-lg">초기화 중...</p>
-                </div>
-              )}
-               {isExporting && (
-                <div className="absolute inset-0 bg-gray-900 bg-opacity-75 flex flex-col justify-center items-center z-50">
-                  <Icon name="loader-2" size={64} className="animate-spin text-blue-400" />
-                  <p className="mt-4 text-lg">McFunction 파일들을 생성 중입니다...</p>
-                </div>
-              )}
-              
-              <main className="flex-grow p-4 md:p-6 lg:p-8 flex flex-col md:flex-row gap-6">
-                {loadingError && !isLoading && (
-                    <div className="w-full flex flex-col items-center justify-center text-center bg-red-900/50 p-8 rounded-lg">
-                        <Icon name="alert-triangle" size={48} className="text-red-400" />
-                        <h2 className="mt-4 text-2xl font-bold">오류 발생</h2>
-                        <p className="mt-2 text-red-300">{loadingError}</p>
-                        <p className="mt-2 text-sm text-gray-400">페이지를 새로고침하여 다시 시도해주세요.</p>
-                    </div>
-                )}
-
-                {!loadingError && midiData ? (
-                  <>
-                    <div className="w-full md:w-1/3 lg:w-1/4 bg-gray-800/50 rounded-lg shadow-xl p-4 flex flex-col">
-                      <h2 className="text-lg font-semibold border-b border-gray-600 pb-2 mb-4">{fileName || "MIDI 정보"}</h2>
-                      <div className="bg-gray-700 p-3 rounded-lg flex justify-around items-center mb-4">
-                          <button onClick={togglePlayback} disabled={!areSoundsLoaded} className="p-3 bg-blue-600 rounded-full text-white hover:bg-blue-500 disabled:bg-gray-500 disabled:cursor-not-allowed transition-all transform hover:scale-110" title={!areSoundsLoaded ? "사운드 로딩 실패" : "재생/일시정지"}>
-                              <Icon name={playbackState === 'playing' ? 'pause' : 'play'} size={24} />
-                          </button>
-                          <button onClick={stopPlayback} disabled={!areSoundsLoaded} className="p-3 bg-red-600 rounded-full text-white hover:bg-red-500 disabled:bg-gray-500 disabled:cursor-not-allowed transition-all transform hover:scale-110" title={!areSoundsLoaded ? "사운드 로딩 실패" : "정지"}>
-                              <Icon name="square" size={24} />
-                          </button>
-                      </div>
-                      <div className="flex border-b border-gray-600 mb-2">
-                          <button onClick={() => setActiveTab('tracks')} className={`py-2 px-4 flex items-center gap-2 ${activeTab === 'tracks' ? 'border-b-2 border-blue-400 text-blue-300' : 'text-gray-400'}`}>
-                              <Icon name="list-music" size={18}/> 트랙 목록
-                          </button>
-                          <button onClick={() => setActiveTab('export')} className={`py-2 px-4 flex items-center gap-2 ${activeTab === 'export' ? 'border-b-2 border-blue-400 text-blue-300' : 'text-gray-400'}`}>
-                              <Icon name="download" size={18}/> 내보내기
-                          </button>
-                      </div>
-                      {activeTab === 'tracks' && (
-                        <div className="flex-grow overflow-y-auto pr-2">
-                          <p className="text-sm text-gray-400 mb-3">각 트랙에 마인크래프트 사운드를 지정하세요.</p>
-                          {midiData.tracks.map((track, index) => (
-                            <div key={index} className="mb-3 p-3 bg-gray-700 rounded-lg">
-                              <p className="font-bold truncate" title={track.name || `트랙 ${index + 1}`}>{track.instrument.name || `트랙 ${index + 1}`}</p>
-                              <p className="text-xs text-gray-400 mb-2">{track.notes.length}개의 노트</p>
-                              <select value={instrumentMapping[index] || ''} onChange={(e) => handleInstrumentChange(index, e.target.value)} className="w-full p-2 bg-gray-600 border border-gray-500 rounded-md text-white focus:outline-none focus:ring-2 focus:ring-blue-500">
-                                {MINECRAFT_SOUNDS.map(sound => (<option key={sound} value={sound}>{sound}</option>))}
-                              </select>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                      {activeTab === 'export' && (
-                          <div className="flex-grow flex flex-col justify-center items-center">
-                              <p className="text-center text-gray-300 mb-4">설정이 완료되었으면 .mcfunction 팩으로 내보내세요.</p>
-                              <button onClick={exportMcFunction} className="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-4 rounded-lg flex items-center justify-center gap-2 transition-colors">
-                                  <Icon name="download" size={20} /> ZIP으로 내보내기
-                              </button>
-                          </div>
-                      )}
-                    </div>
-                    <div className="w-full md:w-2/3 lg:w-3/4 bg-gray-900/50 rounded-lg shadow-xl p-4 overflow-hidden">
-                      <h3 className="text-lg font-semibold border-b border-gray-600 pb-2 mb-4">피아노 롤 (미리보기)</h3>
-                      <PianoRoll midiData={midiData} playbackState={playbackState} />
-                    </div>
-                  </>
-                ) : (
-                  <div className="flex-grow flex justify-center items-center">
-                    {!isLoading && !loadingError && showInstructions && (
-                      <div className="text-center bg-gray-900/50 p-10 rounded-xl shadow-2xl max-w-2xl">
-                        <Icon name="music" size={48} className="mx-auto text-blue-400 mb-4" />
-                        <h2 className="text-3xl font-bold mb-2">마인크래프트 MIDI 변환 스튜디오에 오신 것을 환영합니다!</h2>
-                        <p className="text-gray-300 mb-6">가지고 있는 MIDI 파일을 마인크래프트 베드락 에디션에서 재생할 수 있는 함수 팩으로 변환해보세요.</p>
-                        <div className="text-left bg-gray-800 p-4 rounded-lg border border-gray-700">
-                            <h3 className="font-semibold text-lg mb-2 flex items-center gap-2"><Icon name="info" size={20} /> 사용 방법</h3>
-                            <ol className="list-decimal list-inside space-y-2 text-gray-400">
-                                <li><span className="font-semibold text-white">MIDI 업로드:</span> 오른쪽 상단의 'MIDI 업로드' 버튼을 클릭하여 파일을 선택합니다.</li>
-                                <li><span className="font-semibold text-white">악기 지정:</span> 왼쪽 패널에 표시된 각 트랙에 원하는 마인크래프트 소리를 할당합니다.</li>
-                                <li><span className="font-semibold text-white">미리듣기:</span> 재생 버튼을 눌러 변환된 음악을 웹에서 직접 들어봅니다.</li>
-                                <li><span className="font-semibold text-white">내보내기:</span> '내보내기' 탭에서 ZIP 파일로 다운로드하여 마인크래프트 월드에 적용합니다.</li>
-                            </ol>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                )}
-              </main>
-            </div>
-          );
+        // MIDI 노트 번호를 마인크래프트 피치로 변환
+        function midiNoteToMinecraftPitch(midiNote) {
+            // 마인크래프트 피치 = 2 ^ ((MIDI 노트 번호 - 60) / 12)
+            return Math.pow(2, (midiNote - 60) / 12);
         }
 
-        const container = document.getElementById('root');
-        const root = ReactDOM.createRoot(container);
-        root.render(<App />);
+        // 캔버스 크기 조정
+        function resizeCanvas() {
+            const container = pianoRollCanvas.parentElement;
+            pianoRollCanvas.width = container.clientWidth;
+            pianoRollCanvas.height = container.clientHeight;
+            PIANO_ROLL_WIDTH = pianoRollCanvas.width;
+            PIANO_ROLL_HEIGHT = pianoRollCanvas.height; // 컨테이너 높이에 맞춤
+            drawPianoRoll();
+        }
+
+        // 피아노 롤 그리기
+        function drawPianoRoll() {
+            if (!midiData) {
+                ctx.clearRect(0, 0, pianoRollCanvas.width, pianoRollCanvas.height);
+                ctx.fillStyle = '#6b7280'; // gray-500
+                ctx.font = '20px Inter';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillText('MIDI 파일을 업로드해주세요.', pianoRollCanvas.width / 2, pianoRollCanvas.height / 2);
+                return;
+            }
+
+            ctx.clearRect(0, 0, pianoRollCanvas.width, pianoRollCanvas.height);
+
+            // 그리드 그리기 (시간 축)
+            const totalBeats = Tone.Transport.loopEnd * (Tone.Transport.bpm.value / 60); // 총 비트 수
+            const beatWidth = PIANO_ROLL_WIDTH / totalBeats;
+
+            for (let i = 0; i <= totalBeats; i++) {
+                const x = i * beatWidth;
+                ctx.beginPath();
+                ctx.moveTo(x, 0);
+                ctx.lineTo(x, PIANO_ROLL_HEIGHT);
+                ctx.strokeStyle = (i % 4 === 0) ? '#a0a0a0' : '#c0c0c0'; // 4비트마다 강조
+                ctx.lineWidth = (i % 4 === 0) ? 1.5 : 0.5;
+                ctx.stroke();
+
+                if (i % 4 === 0) { // 마디 번호 표시
+                    ctx.fillStyle = '#555';
+                    ctx.font = '12px Inter';
+                    ctx.fillText(Math.floor(i / 4) + 1, x + 5, 15);
+                }
+            }
+
+            // 그리드 그리기 (음높이 축)
+            const noteHeight = PIANO_ROLL_HEIGHT / (MAX_NOTE_PITCH - MIN_NOTE_PITCH + 1);
+            for (let i = MIN_NOTE_PITCH; i <= MAX_NOTE_PITCH; i++) {
+                const y = PIANO_ROLL_HEIGHT - ((i - MIN_NOTE_PITCH) * noteHeight);
+                ctx.beginPath();
+                ctx.moveTo(0, y);
+                ctx.lineTo(PIANO_ROLL_WIDTH, y);
+                // 검은 건반에 해당하는 음표는 다른 색으로 표시 (C#, D#, F#, G#, A#)
+                const noteName = Tonal.Note.pitchToMidi(i).pc; // 'C', 'C#', 'D' 등
+                ctx.strokeStyle = noteName.includes('#') ? '#b0b0b0' : '#d0d0d0';
+                ctx.lineWidth = 0.5;
+                ctx.stroke();
+            }
+
+
+            // 노트 그리기
+            midiData.tracks.forEach(track => {
+                track.notes.forEach(note => {
+                    const x = (note.time * Tone.Transport.bpm.value / 60) * beatWidth; // 시간을 비트 단위로 변환 후 픽셀로
+                    const y = PIANO_ROLL_HEIGHT - ((note.midi - MIN_NOTE_PITCH) * noteHeight) - noteHeight;
+                    const width = (note.duration * Tone.Transport.bpm.value / 60) * beatWidth;
+                    const height = noteHeight;
+
+                    ctx.fillStyle = `hsl(${track.channel * 30 % 360}, 70%, 50%)`; // 트랙별 색상
+                    ctx.fillRect(x, y, width, height);
+                    ctx.strokeStyle = '#333';
+                    ctx.lineWidth = 1;
+                    ctx.strokeRect(x, y, width, height);
+                });
+            });
+
+            // 재생 헤드 그리기
+            const playheadX = playheadPosition;
+            ctx.beginPath();
+            ctx.moveTo(playheadX, 0);
+            ctx.lineTo(playheadX, PIANO_ROLL_HEIGHT);
+            ctx.strokeStyle = '#ff0000'; // 빨간색
+            ctx.lineWidth = 2;
+            ctx.stroke();
+        }
+
+        // 재생 헤드 애니메이션 시작
+        function startPlayheadAnimation() {
+            const updatePlayhead = () => {
+                const totalBeats = Tone.Transport.loopEnd * (Tone.Transport.bpm.value / 60);
+                const beatWidth = PIANO_ROLL_WIDTH / totalBeats;
+                playheadPosition = Tone.Transport.progress * PIANO_ROLL_WIDTH; // Tone.Transport.progress는 0~1 사이 값
+                drawPianoRoll();
+                animationFrameId = requestAnimationFrame(updatePlayhead);
+            };
+            animationFrameId = requestAnimationFrame(updatePlayhead);
+        }
+
+        // .mcfunction 파일 생성 및 다운로드
+        function generateMcfunctionFiles() {
+            const mcfunctions = {
+                'setup.mcfunction': `scoreboard objectives add music_tick dummy\n`,
+                'play.mcfunction': `scoreboard players set @s music_tick 0\nfunction ${__app_id}/tick\n`, // __app_id 사용
+                'tick.mcfunction': `# This function runs every tick to play music.\n`
+            };
+
+            const notesByTick = {}; // 틱별로 노트들을 그룹화
+
+            // 모든 트랙의 노트를 순회하며 틱별로 playsound 커맨드 생성
+            midiData.tracks.forEach((track, trackIndex) => {
+                const selectedSound = document.getElementById(`track-${trackIndex}-instrument`)?.value || 'note.harp'; // 선택된 사운드 또는 기본값
+
+                track.notes.forEach(note => {
+                    // MIDI 시간(초)을 마인크래프트 틱으로 변환 (1초 = 20틱)
+                    const startTick = Math.round(note.time * 20);
+                    const pitch = midiNoteToMinecraftPitch(note.midi).toFixed(6); // 소수점 6자리까지
+
+                    if (!notesByTick[startTick]) {
+                        notesByTick[startTick] = [];
+                    }
+                    notesByTick[startTick].push(`execute if score @s music_tick matches ${startTick} run playsound ${selectedSound} @a ~ ~ ~ 1.0 ${pitch}`);
+                });
+            });
+
+            // 틱별 playsound 커맨드를 tick.mcfunction에 추가
+            const sortedTicks = Object.keys(notesByTick).sort((a, b) => parseInt(a) - parseInt(b));
+            sortedTicks.forEach(tick => {
+                mcfunctions['tick.mcfunction'] += `\n# Tick ${tick}\n`;
+                notesByTick[tick].forEach(command => {
+                    mcfunctions['tick.mcfunction'] += `${command}\n`;
+                });
+            });
+
+            mcfunctions['tick.mcfunction'] += `\nscoreboard players add @s music_tick 1\n`;
+
+            // ZIP 파일로 묶어 다운로드
+            const zip = new JSZip();
+            const packName = `mc_midi_music_${Date.now()}`;
+            const functionsFolder = zip.folder(`${packName}/functions/${__app_id}`); // __app_id를 폴더명으로 사용
+
+            // manifest.json 파일 추가
+            zip.file(`${packName}/manifest.json`, JSON.stringify({
+                "format_version": 2,
+                "header": {
+                    "description": "Generated Minecraft MIDI Music Pack",
+                    "name": `Minecraft MIDI Music - ${new Date().toLocaleDateString()}`,
+                    "uuid": crypto.randomUUID(),
+                    "version": [1, 0, 0],
+                    "min_engine_version": [1, 16, 0]
+                },
+                "modules": [
+                    {
+                        "description": "Functions for playing MIDI music",
+                        "type": "data",
+                        "uuid": crypto.randomUUID(),
+                        "version": [1, 0, 0]
+                    }
+                ]
+            }, null, 2));
+
+            // .mcfunction 파일들을 ZIP에 추가
+            for (const filename in mcfunctions) {
+                functionsFolder.file(filename, mcfunctions[filename]);
+            }
+
+            zip.generateAsync({ type: "blob" })
+                .then(function (content) {
+                    const url = URL.createObjectURL(content);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `${packName}.zip`;
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                    URL.revokeObjectURL(url);
+                    alert("`.mcfunction` 파일이 포함된 행동 팩이 다운로드되었습니다!");
+                })
+                .catch(error => {
+                    console.error("ZIP 생성 오류:", error);
+                    alert("파일 다운로드 중 오류가 발생했습니다.");
+                });
+        }
+
+        // JSZip 라이브러리 로드 (CDN)
+        const script = document.createElement('script');
+        script.src = 'https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js';
+        document.head.appendChild(script);
+
+        // Tonal.js 라이브러리 로드 (MIDI 노트 이름 변환용)
+        const tonalScript = document.createElement('script');
+        tonalScript.src = 'https://cdn.jsdelivr.net/npm/@tonaljs/tonal@4.6.5/dist/index.min.js';
+        document.head.appendChild(tonalScript);
+
+
+        // 초기 캔버스 그리기
+        window.onload = () => {
+            resizeCanvas();
+            drawPianoRoll();
+        };
     </script>
 </body>
 </html>
